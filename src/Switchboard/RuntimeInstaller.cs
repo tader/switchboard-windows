@@ -76,8 +76,8 @@ public static class RuntimeInstaller {
             var final=Path.Combine(settings.StatePath,"releases",revision+"-"+Guid.NewGuid()); Directory.Move(stage,final);
             var pending = System.Text.Json.JsonSerializer.Deserialize<Settings>(System.Text.Json.JsonSerializer.Serialize(settings))!;
             pending.RuntimePath=final;pending.Configured=true;
-            File.WriteAllText(Path.Combine(settings.StatePath,"runtime-install.json.tmp"),JsonSerializer.Serialize(pending));File.Move(Path.Combine(settings.StatePath,"runtime-install.json.tmp"),Path.Combine(settings.StatePath,"runtime-install.json"),true);
-            File.WriteAllText(Path.Combine(settings.StatePath,"current.json.tmp"),JsonSerializer.Serialize(new {release=final})); File.Move(Path.Combine(settings.StatePath,"current.json.tmp"),Path.Combine(settings.StatePath,"current.json"),true);
+            Settings.Atomic(Path.Combine(settings.StatePath,"runtime-install.json"),JsonSerializer.Serialize(pending));
+            Settings.Atomic(Path.Combine(settings.StatePath,"current.json"),JsonSerializer.Serialize(new {release=final}));
             return final;
         } finally { if(Directory.Exists(stage)) Directory.Delete(stage,true); }
     }

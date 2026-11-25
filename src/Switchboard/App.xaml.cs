@@ -20,14 +20,16 @@ public partial class App : System.Windows.Application {
         _ = Dispatcher.InvokeAsync(async () => { await Task.Delay(10000); await CheckUpdates(); });
         tray = new Forms.NotifyIcon { Icon = new System.Drawing.Icon(System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/AppIcon.ico"))!.Stream), Text = "Switchboard", Visible = true };
         var menu = new Forms.ContextMenuStrip();
-        void Add(string title, Action action) { menu.Items.Add(title, null, (_, _) => Dispatcher.Invoke(action)); }
-        Add("Open Switchboard", () => manager.Open());
-        Add("Start", async () => await manager.Start());
-        Add("Stop", async () => await manager.Stop());
-        Add("Restart", async () => { await manager.Stop(); await manager.Start(); });
+        Forms.ToolStripItem Add(string title, Action action) => menu.Items.Add(title, null, (_, _) => Dispatcher.Invoke(action));
+        var openItem=Add("Open Switchboard", () => manager.Open());
+        var startItem=Add("Start", async () => await manager.Start());
+        var stopItem=Add("Stop", async () => await manager.Stop());
+        var restartItem=Add("Restart", async () => { await manager.Stop(); await manager.Start(); });
         Add("Settings…", ShowSettings);
         Add("Show Logs", () => Manager.OpenUrl(manager.Settings.StatePath));
         Add("Quit Switchboard", async () => { if (await manager.Shutdown()) Shutdown(); });
+        var signIn=Add("Sign in to connections",()=>Manager.OpenUrl(manager.Settings.BrowserUrl.TrimEnd('/')+"/connections"));
+        menu.Opening+=(_,_)=>{openItem.Enabled=manager.Running;startItem.Enabled=!manager.Running&&!manager.Busy;stopItem.Enabled=manager.Running&&!manager.Busy;restartItem.Enabled=manager.Running&&!manager.Busy;signIn.Visible=manager.Attention>0;signIn.Text=$"Sign in to connections ({manager.Attention})";};
         tray.ContextMenuStrip = menu;
         tray.MouseClick += (_, args) => { if (args.Button == Forms.MouseButtons.Left) Dispatcher.Invoke(() => { if (manager.Running) manager.Open(); else ShowSettings(); }); };
         manager.Changed += () => Dispatcher.Invoke(() => { tray.Text = ("Switchboard: " + manager.Status + (manager.Attention > 0 ? $" · {manager.Attention} need sign-in" : ""))[..Math.Min(63, ("Switchboard: " + manager.Status + (manager.Attention > 0 ? $" · {manager.Attention} need sign-in" : "")).Length)]; settings?.Refresh(); });

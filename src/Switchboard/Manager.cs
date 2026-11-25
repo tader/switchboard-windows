@@ -33,7 +33,7 @@ public sealed class Manager : IDisposable {
             using var server=RuntimeInstaller.Lease(Path.Combine(Settings.DataPath,".server-lease.db"));
             var pending=JsonSerializer.Deserialize<Settings>(File.ReadAllText(journal))!; pending.Validate();
             if(pending.RuntimePath==null || !File.Exists(Path.Combine(pending.RuntimePath,"runtime.json")))throw new Exception("Installation recovery requires inspection. Preserve both folders.");
-            File.WriteAllText(Path.Combine(Settings.StatePath,"current.json.tmp"),JsonSerializer.Serialize(new {release=pending.RuntimePath}));File.Move(Path.Combine(Settings.StatePath,"current.json.tmp"),Path.Combine(Settings.StatePath,"current.json"),true);
+            global::Switchboard.Settings.Atomic(Path.Combine(Settings.StatePath,"current.json"),JsonSerializer.Serialize(new {release=pending.RuntimePath}));
             pending.Save();Settings=pending;File.Delete(journal);
         }
  poll.Tick += async (_, _) => { if (Running) await Send(new { action = "status" }); }; }

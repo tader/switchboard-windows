@@ -28,10 +28,17 @@ public sealed class Settings {
         var data = Canonical(DataPath).TrimEnd('\\'); var state = Canonical(StatePath).TrimEnd('\\');
         if (!Path.IsPathFullyQualified(DataPath) || !Path.IsPathFullyQualified(StatePath) || data.StartsWith("\\\\") || state.StartsWith("\\\\") || data.Equals(state, StringComparison.OrdinalIgnoreCase) || data.StartsWith(state + "\\", StringComparison.OrdinalIgnoreCase) || state.StartsWith(data + "\\", StringComparison.OrdinalIgnoreCase)) throw new Exception("Choose separate, absolute local data and updater folders.");
         foreach(var folder in new[]{data,state}) { if(Path.GetPathRoot(folder)?.TrimEnd('\\').Equals(folder.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase)==true || new DriveInfo(Path.GetPathRoot(folder)!).DriveFormat!="NTFS")throw new Exception("Choose user-owned folders on a local NTFS drive, not a drive root."); }
+        if(RuntimePath!=null){var runtime=Canonical(RuntimePath).TrimEnd('\\');if(data.Equals(runtime,StringComparison.OrdinalIgnoreCase)||data.StartsWith(runtime+"\\",StringComparison.OrdinalIgnoreCase)||runtime.StartsWith(data+"\\",StringComparison.OrdinalIgnoreCase)||state.Equals(runtime,StringComparison.OrdinalIgnoreCase)||state.StartsWith(runtime+"\\",StringComparison.OrdinalIgnoreCase))throw new Exception("Runtime, data and updater folders overlap.");}
         if (Port < 1024 || Port > 65535 || Host != "localhost" && !System.Net.IPAddress.TryParse(Host, out _)) throw new Exception("Choose a local IP address and a port from 1024 to 65535.");
         if (!Uri.TryCreate(BrowserUrl, UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https") || url.UserInfo.Length > 0) throw new Exception("Enter an HTTP or HTTPS browser URL without credentials.");
     }
-    public void Save() { Validate(); PrivateFolder(Root); var file = Path.Combine(Root, "settings.json"); File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(this)); File.Move(file + ".tmp", file, true); }
+    [System.Runtime.InteropServices.DllImport("kernel32.dll",CharSet=System.Runtime.InteropServices.CharSet.Unicode,SetLastError=true)] static extern bool MoveFileEx(string source,string target,int flags);
+    public static void Atomic(string file,string text) {
+        var temporary=file+"."+Guid.NewGuid()+".tmp";
+        try{using(var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None,4096,FileOptions.WriteThrough)){var bytes=System.Text.Encoding.UTF8.GetBytes(text);stream.Write(bytes);stream.Flush(true);}if(!MoveFileEx(temporary,file,9))throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());}finally{if(File.Exists(temporary))File.Delete(temporary);}
+    }
+    public void Save() { Validate(); PrivateFolder(Root); Atomic(Path.Combine(Root,"settings.json"),JsonSerializer.Serialize(this)); }
+
     public static string Canonical(string value) {
         var absolute=Path.GetFullPath(value);
         if(absolute.TrimEnd('\\').Equals(Path.GetPathRoot(absolute)!.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))return Path.GetPathRoot(absolute)!;
