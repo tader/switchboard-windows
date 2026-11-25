@@ -86,7 +86,10 @@ public sealed class Manager : IDisposable {
         try { await Send(new { action, requestId = accountId, userId }); var result = await pending.Task.WaitAsync(TimeSpan.FromSeconds(35)); if (result.TryGetProperty("error", out _)) throw new Exception("Update Switchboard or retry when it is idle."); return result; }
         finally { account = null; accountId = null; }
     }
-    public async Task Work(Func<Task> action) { if (Busy) return; Busy = true; Error = null; Notify(); try { await action(); } catch (Exception e) { Error = e.Message; } finally { Busy = false; Notify(); } }
+    private Task currentWork=Task.CompletedTask;
+    public Task Work(Func<Task> action) { if(Busy)return Task.CompletedTask;return currentWork=RunWork(action); }
+    public async Task<bool> Shutdown() { if(Busy){Installation?.Cancel();await currentWork;}return await Stop(); }
+    private async Task RunWork(Func<Task> action) { if (Busy) return; Busy = true; Error = null; Notify(); try { await action(); } catch (Exception e) { Error = e.Message; } finally { Busy = false; Notify(); } }
     public async Task InstallCore() {
         if (Running && !await Stop()) return;
         Installation = new CancellationTokenSource();

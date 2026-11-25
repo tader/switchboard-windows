@@ -27,7 +27,7 @@ public partial class App : System.Windows.Application {
         Add("Restart", async () => { await manager.Stop(); await manager.Start(); });
         Add("Settings…", ShowSettings);
         Add("Show Logs", () => Manager.OpenUrl(manager.Settings.StatePath));
-        Add("Quit Switchboard", async () => { if (await manager.Stop()) Shutdown(); });
+        Add("Quit Switchboard", async () => { if (await manager.Shutdown()) Shutdown(); });
         tray.ContextMenuStrip = menu;
         tray.MouseClick += (_, args) => { if (args.Button == Forms.MouseButtons.Left) Dispatcher.Invoke(() => { if (manager.Running) manager.Open(); else ShowSettings(); }); };
         manager.Changed += () => Dispatcher.Invoke(() => { tray.Text = ("Switchboard: " + manager.Status + (manager.Attention > 0 ? $" · {manager.Attention} need sign-in" : ""))[..Math.Min(63, ("Switchboard: " + manager.Status + (manager.Attention > 0 ? $" · {manager.Attention} need sign-in" : "")).Length)]; settings?.Refresh(); });

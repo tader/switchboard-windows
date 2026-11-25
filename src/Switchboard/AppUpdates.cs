@@ -9,7 +9,7 @@ public static class AppUpdates {
     private static readonly HttpClient client = new() { Timeout = TimeSpan.FromMinutes(10) };
     private static bool busy;
     public static async Task Check(Window owner, Manager manager, bool automatic = false) {
-        if (busy) return;
+        if (busy || manager.Busy) return;
         busy = true;
         string? temporary = null;
         try {
@@ -27,6 +27,7 @@ public static class AppUpdates {
             var updater = new UpdateManager(temporary, new UpdateOptions { ExplicitChannel = channel, MaximumDeltasBeforeFallback = -1 });
             var update = await updater.CheckForUpdatesAsync();
             if (update == null) { if (!automatic) System.Windows.MessageBox.Show(owner,"The Windows app is up to date.","Windows app updates"); return; }
+            if(automatic){owner.Show();owner.Activate();}
             if (System.Windows.MessageBox.Show(owner,"Download and install the Windows app update? Switchboard will stop safely and the app will reopen.","Windows app update",MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
             var assets = JsonDocument.Parse(feed).RootElement.GetProperty("Assets").EnumerateArray().Where(a=>a.GetProperty("Type").GetString()=="Full").ToArray();
             if (assets.Length != 1) throw new Exception("Unexpected update feed contents.");
