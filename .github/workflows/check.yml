@@ -42,6 +42,23 @@ jobs:
           New-Item -ItemType Directory -Force .core-contract/bin | Out-Null
           Copy-Item (Get-Command node).Source .core-contract/bin/node.exe
       - run: dotnet run --project tests/Smoke/Smoke.csproj -c Release -- .dist/screenshots .core-contract
+      - name: Exercise real tray app entry point
+        shell: pwsh
+        run: |
+          $app = Start-Process ".dist/${{ matrix.rid }}/Switchboard.exe" -ArgumentList '--show-settings' -PassThru
+          try {
+            Start-Sleep 5
+            $app.Refresh()
+            if ($app.HasExited -or $app.MainWindowTitle -ne 'Switchboard') { throw 'App did not open settings' }
+            $app.CloseMainWindow() | Out-Null
+            Start-Sleep 1
+            if ($app.HasExited) { throw 'Closing settings quit the tray app' }
+            $second = Start-Process ".dist/${{ matrix.rid }}/Switchboard.exe" -ArgumentList '--show-settings' -PassThru
+            if (!$second.WaitForExit(10000)) { throw 'Second instance did not activate the first' }
+            Start-Sleep 1
+            $app.Refresh()
+            if ($app.MainWindowTitle -ne 'Switchboard') { throw 'Activation did not reopen settings' }
+          } finally { if (!$app.HasExited) { Stop-Process -Id $app.Id -Force } }
       - name: Package unsigned development installer
         shell: pwsh
         run: |
