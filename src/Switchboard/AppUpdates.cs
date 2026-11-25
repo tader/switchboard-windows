@@ -8,6 +8,8 @@ namespace Switchboard;
 public static class AppUpdates {
     private static readonly HttpClient client = new() { Timeout = TimeSpan.FromMinutes(10) };
     private static bool busy;
+    public static bool VerifyFeed(byte[] data, byte[] signature, string pem) {using var key=ECDsa.Create();key.ImportFromPem(pem);return key.VerifyData(data,signature,HashAlgorithmName.SHA256,DSASignatureFormat.Rfc3279DerSequence);}
+
     public static async Task Check(Window owner, Manager manager, bool automatic = false) {
         if (busy || manager.Busy) return;
         busy = true;
@@ -20,8 +22,7 @@ public static class AppUpdates {
             var feed = await client.GetByteArrayAsync(prefix + "releases." + channel + ".json");
             var signature = await client.GetByteArrayAsync(prefix + "releases." + channel + ".json.sig");
             using var reader = new StreamReader(keyStream.Stream);
-            using var key = ECDsa.Create(); key.ImportFromPem(await reader.ReadToEndAsync());
-            if (!key.VerifyData(feed, signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence)) throw new Exception("The app update feed signature is invalid.");
+            if (!VerifyFeed(feed, signature, await reader.ReadToEndAsync())) throw new Exception("The app update feed signature is invalid.");
             temporary = Path.Combine(Settings.Root,"UpdateDownloads",Guid.NewGuid().ToString()); Settings.PrivateFolder(temporary);
             await File.WriteAllBytesAsync(Path.Combine(temporary,"releases." + channel + ".json"), feed);
             var updater = new UpdateManager(temporary, new UpdateOptions { ExplicitChannel = channel, MaximumDeltasBeforeFallback = -1 });
