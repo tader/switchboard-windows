@@ -1,1 +1,11 @@
-{"packages":{".":{"release-type":"simple","component":"switchboard-windows","include-component-in-tag":false}}}
+{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "component": "switchboard-windows",
+      "include-component-in-tag": false
+    }
+  },
+  "draft": true,
+  "force-tag-creation": true
+}
