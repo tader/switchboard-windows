@@ -57,6 +57,8 @@ class Program {
             }
             Console.WriteLine("PASS: settings validation, exclusive lock recovery, verified relocation, WPF layout and screenshot render.");
             return 0;
-        }finally{Directory.Delete(root,true);}
+        }finally{
+            for(var attempt=0;;attempt++){try{Directory.Delete(root,true);break;}catch(IOException)when(attempt<20){Thread.Sleep(250);}}
+        }
     }
 }

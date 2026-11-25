@@ -71,7 +71,7 @@ public static class RuntimeInstaller {
                 using var probe=Process.Start(psi)!; _=probe.StandardOutput.ReadToEndAsync(); _=probe.StandardError.ReadToEndAsync();
                 try { await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(90)); } catch { probe.Kill(true); throw; }
                 if(probe.ExitCode!=0) throw new Exception("This runtime cannot open a copy of your database. Your data and backup are preserved.");
-            } finally { Directory.Delete(rehearsal,true); }
+            } finally { await Settings.RemoveFolder(rehearsal); }
             progress("Finishing installation…");
             cancellation.ThrowIfCancellationRequested();
             File.WriteAllText(Path.Combine(stage,"runtime.json"),manifest.GetRawText()); File.WriteAllText(Path.Combine(stage,".prepared"),"");
@@ -81,7 +81,7 @@ public static class RuntimeInstaller {
             Settings.Atomic(Path.Combine(settings.StatePath,"runtime-install.json"),JsonSerializer.Serialize(pending));
             Settings.Atomic(Path.Combine(settings.StatePath,"current.json"),JsonSerializer.Serialize(new {release=final}));
             return final;
-        } finally { if(Directory.Exists(stage)) Directory.Delete(stage,true); }
+        } finally { await Settings.RemoveFolder(stage); }
     }
     public static void Copy(string source,string target,bool root=true) {
         Settings.PrivateFolder(target);

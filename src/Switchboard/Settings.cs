@@ -46,5 +46,8 @@ public sealed class Settings {
         if(!Directory.Exists(full)) { var parent=Path.GetDirectoryName(full); return parent==null?full:Path.Combine(Canonical(parent),Path.GetFileName(full)); }
         var info=new DirectoryInfo(full); return (info.ResolveLinkTarget(true)?.FullName ?? info.FullName).TrimEnd('\\');
     }
+    public static async Task RemoveFolder(string folder) {
+        for(var attempt=0;;attempt++){try{if(Directory.Exists(folder))Directory.Delete(folder,true);return;}catch(IOException)when(attempt<20){await Task.Delay(250);}}
+    }
     public static Settings Load() { var file = Path.Combine(Root, "settings.json"); return File.Exists(file) ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(file))! : new(); }
 }

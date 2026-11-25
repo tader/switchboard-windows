@@ -62,6 +62,6 @@ public static class AppUpdates {
             if (!await manager.Stop()) return;
             updater.ApplyUpdatesAndRestart(update);
         } catch (Exception e) { if (!automatic) System.Windows.MessageBox.Show(owner,e.Message,"Windows app update unavailable"); }
-        finally { if (temporary != null && Directory.Exists(temporary)) Directory.Delete(temporary,true); busy=false; }
+        finally { try{if(temporary!=null)await Settings.RemoveFolder(temporary);}catch(IOException){}busy=false; }
     }
 }
