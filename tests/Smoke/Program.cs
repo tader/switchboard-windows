@@ -33,6 +33,9 @@ class Program {
             Console.WriteLine("Starting WPF render smoke checks");
             var app=new System.Windows.Application();app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.xaml")});
             using var manager=new Manager();var window=new MainWindow(manager);window.Show();window.UpdateLayout();
+            IEnumerable<System.Windows.DependencyObject> Descendants(System.Windows.DependencyObject parent){for(var i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++){var child=VisualTreeHelper.GetChild(parent,i);yield return child;foreach(var nested in Descendants(child))yield return nested;}}
+            Require(Descendants(window).OfType<TextBlock>().Any(t=>t.Text=="Server"),"Server update panel is missing");
+            Require(Descendants(window).OfType<TextBlock>().Any(t=>t.Text=="Windows app"),"App update panel is missing");
             var directory=args.Length>0?args[0]:root;Directory.CreateDirectory(directory);
             foreach(var theme in new[]{ThemeMode.Light,ThemeMode.Dark}) foreach(var width in new[]{600,460}) {
                 app.ThemeMode=theme;
