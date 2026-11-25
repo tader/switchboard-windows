@@ -6,6 +6,7 @@ public sealed class Manager : IDisposable {
     public Settings Settings { get; private set; } = global::Switchboard.Settings.Load();
     public string Status { get; private set; } = "Not running";
     public string? Error { get; private set; }
+    public int? OwnedSupervisorId => Running ? child!.Id : null;
     public bool Running => child is { HasExited: false };
     public Guid Session { get; private set; } = Guid.NewGuid();
     public bool Busy { get; private set; }

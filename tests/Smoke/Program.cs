@@ -54,6 +54,10 @@ class Program {
                 Require(setup?.Contains("/invite#")==true,"Initial setup link not received over private pipes");
                 Wait(local.Stop());Require(!local.Running,"Owned server remained running");
                 Wait(local.Start());Wait(Task.Delay(1500));Wait(local.Stop());
+                Wait(local.Start());Wait(Task.Delay(1500));
+                var supervisor=local.OwnedSupervisorId;Require(supervisor!=null,"No owned supervisor");System.Diagnostics.Process.GetProcessById(supervisor!.Value).Kill();
+                Wait(Task.Run(async()=>{var until=DateTime.UtcNow.AddSeconds(20);while(local.Status!="Not running"){if(DateTime.UtcNow>until)throw new Exception("Supervisor crash cleanup timed out");await Task.Delay(100);}}));
+                Wait(Task.Run(async()=>{using var http=new System.Net.Http.HttpClient();var until=DateTime.UtcNow.AddSeconds(20);while(true){try{await http.GetAsync(owned.BrowserUrl+"/readyz");}catch(System.Net.Http.HttpRequestException){break;}if(DateTime.UtcNow>until)throw new Exception("Crash left an owned server running");await Task.Delay(100);}}));
             }
             Console.WriteLine("PASS: settings validation, exclusive lock recovery, verified relocation, WPF layout and screenshot render.");
             return 0;
