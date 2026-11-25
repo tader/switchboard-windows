@@ -7,6 +7,8 @@ namespace Switchboard;
 public sealed class MainWindow : Window {
     readonly Manager manager; readonly StackPanel body=new(){Margin=new Thickness(24)};
     bool advanced;
+    int releasePage=1;
+    readonly List<string> versionTags=new();
     public MainWindow(Manager model) {manager=model;Title="Switchboard";Width=600;Height=760;MinWidth=460;MinHeight=500;Content=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};Microsoft.Win32.SystemEvents.UserPreferenceChanged+=(_,_)=>Dispatcher.Invoke(Refresh);SizeChanged+=(_,_)=>Refresh();Closing+=(_,e)=>{e.Cancel=true;Hide();};Refresh();}
     void Text(string value,bool heading=false) {body.Children.Add(new TextBlock{Foreground=Foreground,Text=value,TextWrapping=TextWrapping.Wrap,FontSize=heading?20:14,FontWeight=heading?FontWeights.SemiBold:FontWeights.Normal,Margin=new Thickness(0,heading?20:6,0,6)});}
     void Button(string label,Func<Task> action,bool enabled=true) {var b=new System.Windows.Controls.Button{Content=label,IsEnabled=enabled,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,5,0,5),Padding=new Thickness(12,6,12,6)};b.Click+=async(_,_)=>{try{await action();}catch(Exception e){System.Windows.MessageBox.Show(this,e.Message,"Switchboard");}Refresh();};body.Children.Add(b);}
@@ -49,14 +51,22 @@ public sealed class MainWindow : Window {
                 var copy=new CheckBox{Content="Copy and verify folders when moving data",Margin=new Thickness(0,10,0,10)};body.Children.Add(copy);
                 Button("Save Changes",()=>{foreach(var f in fields)f.Save(f.Box.Text);draft.Validate();if(copy.IsChecked==true)Maintenance.Relocate(manager.Settings,draft);manager.ApplySettings(draft);return Task.CompletedTask;},!manager.Running&&!manager.Busy);
                 Text("Version pinning",true);Toggle("Pin a specific version",manager.Settings.Pin!=null,v=>{manager.Settings.Pin=v?"choose-version":null;Refresh();});
-                if(manager.Settings.Pin!=null){var choices=new ComboBox{MinWidth=200};body.Children.Add(choices);_=LoadVersions(choices);}
+                if(manager.Settings.Pin!=null){var choices=new ComboBox{MinWidth=200};body.Children.Add(choices);releasePage=1;versionTags.Clear();_=LoadVersions(choices);Button("Load Older Versions",async()=>{releasePage++;await LoadVersions(choices);});}
                 Button("Open Windows Startup Apps",()=>{Manager.OpenUrl("ms-settings:startupapps");return Task.CompletedTask;});
                 Text("Maintenance",true);Button("Recover Server Lock…",()=>{if(System.Windows.MessageBox.Show(this,"Archive leftover lock metadata after checking exclusive ownership? Data stays in place.","Recover server lock",MessageBoxButton.OKCancel)==MessageBoxResult.OK)Maintenance.RecoverLock(manager.Settings);return Task.CompletedTask;},!manager.Running&&!manager.Busy);Button("Show Logs and Backups",()=>{Manager.OpenUrl(manager.Settings.StatePath);return Task.CompletedTask;});Button("Reinstall Selected Release",()=>manager.Work(manager.InstallCore),!manager.Busy);
             }
             Button(advanced?"Back to Settings":"Advanced…",()=>{advanced=!advanced;Refresh();return Task.CompletedTask;});Text("Closing this window keeps Switchboard running.");
         });
     }
-    async Task LoadVersions(ComboBox box){try{var rows=await RuntimeInstaller.Releases();box.ItemsSource=rows.Where(r=>!r.GetProperty("draft").GetBoolean()&&r.GetProperty("assets").EnumerateArray().Any(a=>a.GetProperty("name").GetString()==$"runtime-win32-{RuntimeInstaller.Arch}.json")).Select(r=>r.GetProperty("tag_name").GetString()).ToArray();box.SelectedItem=manager.Settings.Pin;box.SelectionChanged+=(_,_)=>{if(box.SelectedItem is string tag){manager.Settings.Pin=tag;manager.Settings.Save();}};}catch{box.IsEnabled=false;}}
+    async Task LoadVersions(ComboBox box){try{
+        box.IsEnabled=false;
+        var rows=await RuntimeInstaller.Releases(releasePage);
+        versionTags.AddRange(rows.Where(r=>!r.GetProperty("draft").GetBoolean()&&r.GetProperty("assets").EnumerateArray().Any(a=>a.GetProperty("name").GetString()==$"runtime-win32-{RuntimeInstaller.Arch}.json")).Select(r=>r.GetProperty("tag_name").GetString()!));
+        box.ItemsSource=versionTags.Distinct().ToArray();box.SelectedItem=manager.Settings.Pin;
+        box.SelectionChanged+=(_,_)=>{if(box.SelectedItem is string tag){manager.Settings.Pin=tag;manager.Settings.Save();}};
+        if(box.SelectedIndex<0&&versionTags.Count>0)box.SelectedIndex=0;box.IsEnabled=true;
+    }catch{box.IsEnabled=false;}}
+
     async Task Recover(){
         var result=await manager.Account("account-users");var users=result.GetProperty("users").EnumerateArray().ToArray();
         var window=new Window{Title="Recover a password",Width=420,Height=240,Owner=this,WindowStartupLocation=WindowStartupLocation.CenterOwner};var panel=new StackPanel{Margin=new Thickness(24)};window.Content=panel;

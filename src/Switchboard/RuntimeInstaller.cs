@@ -11,11 +11,11 @@ namespace Switchboard;
 public static class RuntimeInstaller {
     public static string Arch => RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64";
     private static readonly HttpClient client = new() { Timeout = TimeSpan.FromMinutes(10), DefaultRequestHeaders = { { "User-Agent", "switchboard-windows" } } };
-    public static async Task<JsonElement[]> Releases() => JsonSerializer.Deserialize<JsonElement[]>(await client.GetStringAsync("https://api.github.com/repos/tader/switchboard/releases?per_page=100"))!;
+    public static async Task<JsonElement[]> Releases(int page=1,CancellationToken cancellation=default) => JsonSerializer.Deserialize<JsonElement[]>(await client.GetStringAsync("https://api.github.com/repos/tader/switchboard/releases?per_page=100&page="+page,cancellation))!;
     public static SqliteConnection Lease(string file) { var db = new SqliteConnection($"Data Source={file};Default Timeout=1;Pooling=False"); db.Open(); using var cmd = db.CreateCommand(); cmd.CommandText = "CREATE TABLE IF NOT EXISTS lease(id INTEGER); BEGIN EXCLUSIVE;"; cmd.ExecuteNonQuery(); return db; }
     public static async Task<string> Install(Settings settings, Action<string> progress, CancellationToken cancellation = default) {
         settings.Validate(); Settings.PrivateFolder(settings.StatePath);
-        var releases = await Releases();
+        var releases = await Releases(1,cancellation);
         var name = $"runtime-win32-{Arch}.json";
         var release = releases.FirstOrDefault(r => !r.GetProperty("draft").GetBoolean() && (settings.Pin != null ? r.GetProperty("tag_name").GetString() == settings.Pin : r.GetProperty("prerelease").GetBoolean() == (settings.Channel == "development")) && r.GetProperty("assets").EnumerateArray().Any(a => a.GetProperty("name").GetString() == name));
         if (release.ValueKind == JsonValueKind.Undefined) throw new Exception("No compatible Windows runtime is published for this selection yet.");
@@ -30,11 +30,11 @@ public static class RuntimeInstaller {
         var stage = Path.Combine(settings.StatePath, "releases", Guid.NewGuid() + ".partial"); Settings.PrivateFolder(stage);
         try {
             var archive = Path.Combine(stage, "download.tar.gz");
-            using (var response = await client.GetAsync(prefix + archiveName, HttpCompletionOption.ResponseHeadersRead)) {
+            using (var response = await client.GetAsync(prefix + archiveName, HttpCompletionOption.ResponseHeadersRead,cancellation)) {
                 response.EnsureSuccessStatusCode();
                 var host = response.RequestMessage!.RequestUri!.Host;
                 if (host is not ("github.com" or "release-assets.githubusercontent.com" or "objects.githubusercontent.com")) throw new Exception("Untrusted runtime origin.");
-                await using var input = await response.Content.ReadAsStreamAsync(); await using var output = File.Create(archive);
+                await using var input = await response.Content.ReadAsStreamAsync(cancellation); await using var output = File.Create(archive);
                 var buffer = new byte[65536]; long received = 0; int count;
                 while ((count = await input.ReadAsync(buffer, cancellation)) > 0) { received += count; if (received > 512L*1024*1024) throw new Exception("Runtime exceeds download limit."); await output.WriteAsync(buffer.AsMemory(0,count)); progress(response.Content.Headers.ContentLength is long total ? $"Downloading… {received*100/total}% · {received/1048576} MB" : $"Downloading… {received/1048576} MB"); }
             }
@@ -53,6 +53,8 @@ public static class RuntimeInstaller {
             }
             File.Delete(archive);
             var info=JsonDocument.Parse(File.ReadAllText(Path.Combine(stage,"build-info.json"))).RootElement;
+            var package=JsonDocument.Parse(File.ReadAllText(Path.Combine(stage,"package.json"))).RootElement;
+            if(package.GetProperty("managedUpgradeProtocol").GetInt32()!=1 || package.GetProperty("version").GetString()!=manifest.GetProperty("version").GetString() || info.GetProperty("version").GetString()!=manifest.GetProperty("version").GetString())throw new Exception("Incompatible runtime build metadata.");
             if(info.GetProperty("revision").GetString()!=revision || info.GetProperty("platform").GetString()!="win32" || info.GetProperty("arch").GetString()!=Arch || !File.Exists(Path.Combine(stage,"bin","node.exe"))) throw new Exception("Runtime identity mismatch.");
             using var controller=Lease(Path.Combine(settings.StatePath,"controller-lease.db"));
             Settings.PrivateFolder(settings.DataPath);
