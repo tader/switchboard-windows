@@ -81,11 +81,23 @@ public sealed class Manager : IDisposable {
         if (!Running) return true;
         Session = Guid.NewGuid();
         stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        await Send(new { action = "quit" });
-        try { await child!.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(5)); poll.Stop(); child.Dispose(); child = null; Status = "Not running"; Notify(); return true; }
+        try { await Send(new { action = "quit" }); await child!.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(5)); poll.Stop(); child.Dispose(); child = null; Status = "Not running"; Notify(); return true; }
         catch { Error = "Switchboard is still finishing an operation. Wait and retry."; Notify(); return false; }
     }
-    public async Task<JsonElement> Account(string action, string? userId = null) {
+    public Task<JsonElement> Account(string action) {
+        if(action is not ("account-users" or "account-setup"))throw new Exception("This account action requires fresh Windows verification.");
+        return AccountAction(action);
+    }
+    public async Task<JsonElement> RecoverAccount(string userId,IntPtr owner,Func<bool> visible) {
+        var session=Session;JsonElement result=default;
+        await RecoveryAuthorization.Run(async()=>{
+            var available=await Windows.Security.Credentials.UI.UserConsentVerifier.CheckAvailabilityAsync();
+            if(available!=Windows.Security.Credentials.UI.UserConsentVerifierAvailability.Available)throw new Exception("Windows verification is unavailable. Set up Windows Hello/PIN in Windows Settings, then retry.");
+            return await Windows.Security.Credentials.UI.UserConsentVerifierInterop.RequestVerificationForWindowAsync(owner,"Recover a Switchboard password on this PC.")==Windows.Security.Credentials.UI.UserConsentVerificationResult.Verified;
+        },()=>visible()&&session==Session&&Running&&!Busy,async()=>result=await AccountAction("account-recovery",userId));
+        return result;
+    }
+    private async Task<JsonElement> AccountAction(string action, string? userId = null) {
         if (account != null) throw new Exception("An account action is already in progress.");
         var pending = account = new(TaskCreationOptions.RunContinuationsAsynchronously); accountId = Guid.NewGuid().ToString();
         try { await Send(new { action, requestId = accountId, userId }); var result = await pending.Task.WaitAsync(TimeSpan.FromSeconds(35)); if (result.TryGetProperty("error", out _)) throw new Exception("Update Switchboard or retry when it is idle."); return result; }
