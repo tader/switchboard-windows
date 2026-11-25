@@ -12,8 +12,8 @@ public static class RuntimeInstaller {
     public static string Arch => RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64";
     private static readonly HttpClient client = new() { Timeout = TimeSpan.FromMinutes(10), DefaultRequestHeaders = { { "User-Agent", "switchboard-windows" } } };
     public static async Task<JsonElement[]> Releases() => JsonSerializer.Deserialize<JsonElement[]>(await client.GetStringAsync("https://api.github.com/repos/tader/switchboard/releases?per_page=100"))!;
-    private static SqliteConnection Lease(string file) { var db = new SqliteConnection($"Data Source={file};Default Timeout=0"); db.Open(); using var cmd = db.CreateCommand(); cmd.CommandText = "CREATE TABLE IF NOT EXISTS lease(id INTEGER); BEGIN EXCLUSIVE;"; cmd.ExecuteNonQuery(); return db; }
-    public static async Task<string> Install(Settings settings, Action<string> progress) {
+    public static SqliteConnection Lease(string file) { var db = new SqliteConnection($"Data Source={file};Default Timeout=0"); db.Open(); using var cmd = db.CreateCommand(); cmd.CommandText = "CREATE TABLE IF NOT EXISTS lease(id INTEGER); BEGIN EXCLUSIVE;"; cmd.ExecuteNonQuery(); return db; }
+    public static async Task<string> Install(Settings settings, Action<string> progress, CancellationToken cancellation = default) {
         settings.Validate(); Settings.PrivateFolder(settings.StatePath);
         var releases = await Releases();
         var name = $"runtime-win32-{Arch}.json";
@@ -36,13 +36,14 @@ public static class RuntimeInstaller {
                 if (host is not ("github.com" or "release-assets.githubusercontent.com" or "objects.githubusercontent.com")) throw new Exception("Untrusted runtime origin.");
                 await using var input = await response.Content.ReadAsStreamAsync(); await using var output = File.Create(archive);
                 var buffer = new byte[65536]; long received = 0; int count;
-                while ((count = await input.ReadAsync(buffer)) > 0) { received += count; if (received > 512L*1024*1024) throw new Exception("Runtime exceeds download limit."); await output.WriteAsync(buffer.AsMemory(0,count)); progress(response.Content.Headers.ContentLength is long total ? $"Downloading… {received*100/total}% · {received/1048576} MB" : $"Downloading… {received/1048576} MB"); }
+                while ((count = await input.ReadAsync(buffer, cancellation)) > 0) { received += count; if (received > 512L*1024*1024) throw new Exception("Runtime exceeds download limit."); await output.WriteAsync(buffer.AsMemory(0,count)); progress(response.Content.Headers.ContentLength is long total ? $"Downloading… {received*100/total}% · {received/1048576} MB" : $"Downloading… {received/1048576} MB"); }
             }
             if (Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(archive))).ToLowerInvariant() != manifest.GetProperty("sha256").GetString()) throw new Exception("Runtime checksum mismatch.");
             progress("Verifying and unpacking…");
             using (var file = File.OpenRead(archive)) using (var gzip = new GZipStream(file, CompressionMode.Decompress)) using (var tar = new TarReader(gzip)) {
                 var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase); long size=0;
                 while (tar.GetNextEntry() is { } entry) {
+                    cancellation.ThrowIfCancellationRequested();
                     var parts = entry.Name.TrimEnd('/').Split('/');
                     if (parts.Any(p => p.Length==0 || p is "." or ".." || p.EndsWith('.') || p.EndsWith(' ') || p.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || System.Text.RegularExpressions.Regex.IsMatch(p, "^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:[.]|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) || !names.Add(entry.Name.TrimEnd('/')) || entry.EntryType is not (TarEntryType.Directory or TarEntryType.RegularFile or TarEntryType.V7RegularFile)) throw new Exception("Unsafe runtime archive.");
                     size += entry.Length; if(size>1024L*1024*1024) throw new Exception("Expanded runtime exceeds limit.");
@@ -69,13 +70,17 @@ public static class RuntimeInstaller {
                 try { await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(90)); } catch { probe.Kill(true); throw; }
                 if(probe.ExitCode!=0) throw new Exception("This runtime cannot open a copy of your database. Your data and backup are preserved.");
             } finally { Directory.Delete(rehearsal,true); }
+            cancellation.ThrowIfCancellationRequested();
             File.WriteAllText(Path.Combine(stage,"runtime.json"),manifest.GetRawText()); File.WriteAllText(Path.Combine(stage,".prepared"),"");
             var final=Path.Combine(settings.StatePath,"releases",revision+"-"+Guid.NewGuid()); Directory.Move(stage,final);
+            var pending = System.Text.Json.JsonSerializer.Deserialize<Settings>(System.Text.Json.JsonSerializer.Serialize(settings))!;
+            pending.RuntimePath=final;pending.Configured=true;
+            File.WriteAllText(Path.Combine(settings.StatePath,"runtime-install.json.tmp"),JsonSerializer.Serialize(pending));File.Move(Path.Combine(settings.StatePath,"runtime-install.json.tmp"),Path.Combine(settings.StatePath,"runtime-install.json"),true);
             File.WriteAllText(Path.Combine(settings.StatePath,"current.json.tmp"),JsonSerializer.Serialize(new {release=final})); File.Move(Path.Combine(settings.StatePath,"current.json.tmp"),Path.Combine(settings.StatePath,"current.json"),true);
             return final;
         } finally { if(Directory.Exists(stage)) Directory.Delete(stage,true); }
     }
-    private static void Copy(string source,string target) {
+    public static void Copy(string source,string target) {
         Settings.PrivateFolder(target);
         foreach(var file in Directory.EnumerateFileSystemEntries(source)) {
             if(Path.GetFileName(file).StartsWith("Singleton")) continue;

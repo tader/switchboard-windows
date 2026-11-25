@@ -25,11 +25,19 @@ public sealed class Settings {
         new DirectoryInfo(path).SetAccessControl(acl);
     }
     public void Validate() {
-        var data = Path.GetFullPath(DataPath).TrimEnd('\\'); var state = Path.GetFullPath(StatePath).TrimEnd('\\');
+        var data = Canonical(DataPath).TrimEnd('\\'); var state = Canonical(StatePath).TrimEnd('\\');
         if (!Path.IsPathFullyQualified(DataPath) || !Path.IsPathFullyQualified(StatePath) || data.StartsWith("\\\\") || state.StartsWith("\\\\") || data.Equals(state, StringComparison.OrdinalIgnoreCase) || data.StartsWith(state + "\\", StringComparison.OrdinalIgnoreCase) || state.StartsWith(data + "\\", StringComparison.OrdinalIgnoreCase)) throw new Exception("Choose separate, absolute local data and updater folders.");
+        foreach(var folder in new[]{data,state}) { if(Path.GetPathRoot(folder)?.TrimEnd('\\').Equals(folder.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase)==true || new DriveInfo(Path.GetPathRoot(folder)!).DriveFormat!="NTFS")throw new Exception("Choose user-owned folders on a local NTFS drive, not a drive root."); }
         if (Port < 1024 || Port > 65535 || Host != "localhost" && !System.Net.IPAddress.TryParse(Host, out _)) throw new Exception("Choose a local IP address and a port from 1024 to 65535.");
         if (!Uri.TryCreate(BrowserUrl, UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https") || url.UserInfo.Length > 0) throw new Exception("Enter an HTTP or HTTPS browser URL without credentials.");
     }
     public void Save() { Validate(); PrivateFolder(Root); var file = Path.Combine(Root, "settings.json"); File.WriteAllText(file + ".tmp", JsonSerializer.Serialize(this)); File.Move(file + ".tmp", file, true); }
+    public static string Canonical(string value) {
+        var absolute=Path.GetFullPath(value);
+        if(absolute.TrimEnd('\\').Equals(Path.GetPathRoot(absolute)!.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))return Path.GetPathRoot(absolute)!;
+        var full=absolute.TrimEnd('\\');
+        if(!Directory.Exists(full)) { var parent=Path.GetDirectoryName(full); return parent==null?full:Path.Combine(Canonical(parent),Path.GetFileName(full)); }
+        var info=new DirectoryInfo(full); return (info.ResolveLinkTarget(true)?.FullName ?? info.FullName).TrimEnd('\\');
+    }
     public static Settings Load() { var file = Path.Combine(Root, "settings.json"); return File.Exists(file) ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(file))! : new(); }
 }

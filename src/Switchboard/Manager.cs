@@ -3,14 +3,17 @@ using System.IO;
 using System.Text.Json;
 namespace Switchboard;
 public sealed class Manager : IDisposable {
-    public Settings Settings { get; } = global::Switchboard.Settings.Load();
+    public Settings Settings { get; private set; } = global::Switchboard.Settings.Load();
     public string Status { get; private set; } = "Not running";
     public string? Error { get; private set; }
     public bool Running => child is { HasExited: false };
+    public Guid Session { get; private set; } = Guid.NewGuid();
     public bool Busy { get; private set; }
     public int Attention { get; private set; }
     public bool AccountReady { get; private set; }
     public event Action? Changed;
+    public void ApplySettings(Settings value) { value.Save(); Settings = value; Notify(); }
+    public CancellationTokenSource? Installation { get; private set; }
     private Process? child;
     private Task? reader;
     private readonly SemaphoreSlim commands = new(1);
@@ -19,7 +22,17 @@ public sealed class Manager : IDisposable {
     private TaskCompletionSource<JsonElement>? account;
     private string? accountId;
     private readonly Job job = new();
-    public Manager() { poll.Tick += async (_, _) => { if (Running) await Send(new { action = "status" }); }; }
+    public Manager() {
+        var journal=Path.Combine(Settings.StatePath,"runtime-install.json");
+        if(File.Exists(journal)) {
+            using var controller=RuntimeInstaller.Lease(Path.Combine(Settings.StatePath,"controller-lease.db"));
+            using var server=RuntimeInstaller.Lease(Path.Combine(Settings.DataPath,".server-lease.db"));
+            var pending=JsonSerializer.Deserialize<Settings>(File.ReadAllText(journal))!; pending.Validate();
+            if(pending.RuntimePath==null || !File.Exists(Path.Combine(pending.RuntimePath,"runtime.json")))throw new Exception("Installation recovery requires inspection. Preserve both folders.");
+            File.WriteAllText(Path.Combine(Settings.StatePath,"current.json.tmp"),JsonSerializer.Serialize(new {release=pending.RuntimePath}));File.Move(Path.Combine(Settings.StatePath,"current.json.tmp"),Path.Combine(Settings.StatePath,"current.json"),true);
+            pending.Save();Settings=pending;File.Delete(journal);
+        }
+ poll.Tick += async (_, _) => { if (Running) await Send(new { action = "status" }); }; }
     public void Notify() => Changed?.Invoke();
     public static void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     public void Open() { if (Running) OpenUrl(Settings.BrowserUrl); }
@@ -31,6 +44,7 @@ public sealed class Manager : IDisposable {
             var start = new ProcessStartInfo(Path.Combine(Settings.RuntimePath!, "bin", "node.exe")) { WorkingDirectory = Settings.RuntimePath!, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
             start.ArgumentList.Add("--disable-warning=ExperimentalWarning"); start.ArgumentList.Add("updater/desktop.ts");
             start.Environment.Remove("NODE_OPTIONS"); start.Environment.Remove("NODE_PATH");
+            Session = Guid.NewGuid();
             child = Process.Start(start) ?? throw new Exception("Could not start Switchboard.");
             job.Attach(child);
             // Never forward raw stderr, IPC payloads or setup links into logs.
@@ -60,6 +74,7 @@ public sealed class Manager : IDisposable {
     }
     public async Task<bool> Stop() {
         if (!Running) return true;
+        Session = Guid.NewGuid();
         stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
         await Send(new { action = "quit" });
         try { await child!.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(5)); poll.Stop(); child.Dispose(); child = null; Status = "Not running"; Notify(); return true; }
@@ -74,8 +89,11 @@ public sealed class Manager : IDisposable {
     public async Task Work(Func<Task> action) { if (Busy) return; Busy = true; Error = null; Notify(); try { await action(); } catch (Exception e) { Error = e.Message; } finally { Busy = false; Notify(); } }
     public async Task InstallCore() {
         if (Running && !await Stop()) return;
-        var path = await RuntimeInstaller.Install(Settings, text => { Status = text; Notify(); });
-        Settings.RuntimePath = path; Settings.Configured = true; Settings.Save(); Status = "Not running";
+        Installation = new CancellationTokenSource();
+        string path;
+        try { path = await Task.Run(() => RuntimeInstaller.Install(Settings, text => { Status = text; Notify(); }, Installation.Token)); }
+        finally { Installation.Dispose(); Installation = null; }
+        Settings.RuntimePath = path; Settings.Configured = true; Settings.Save(); File.Delete(Path.Combine(Settings.StatePath,"runtime-install.json")); Status = "Not running";
     }
     public void Dispose() { poll.Stop(); job.Dispose(); child?.Dispose(); }
 }

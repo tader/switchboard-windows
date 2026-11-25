@@ -7,12 +7,17 @@ public partial class App : System.Windows.Application {
     private Forms.NotifyIcon? tray;
     private Manager? manager;
     private MainWindow? settings;
+    private readonly System.Windows.Threading.DispatcherTimer updateTimer = new() { Interval = TimeSpan.FromDays(1) };
     protected override void OnStartup(StartupEventArgs e) {
         Velopack.VelopackApp.Build().SetAutoApplyOnStartup(false).Run();
+        ThemeMode=System.Windows.ThemeMode.System;
         base.OnStartup(e);
         mutex = new Mutex(true, "Local\\Switchboard-" + System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value, out var first);
         if (!first) { Shutdown(); return; }
-        manager = new Manager();
+        try { manager = new Manager(); } catch(Exception error) {System.Windows.MessageBox.Show(error.Message,"Switchboard needs attention");Shutdown();return;}
+        async Task CheckUpdates() { if (manager.Settings.AutomaticAppChecks) { settings ??= new MainWindow(manager); await AppUpdates.Check(settings, manager, true); } }
+        updateTimer.Tick += async (_, _) => await CheckUpdates(); updateTimer.Start();
+        _ = Dispatcher.InvokeAsync(async () => { await Task.Delay(10000); await CheckUpdates(); });
         tray = new Forms.NotifyIcon { Icon = new System.Drawing.Icon(System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/AppIcon.ico"))!.Stream), Text = "Switchboard", Visible = true };
         var menu = new Forms.ContextMenuStrip();
         void Add(string title, Action action) { menu.Items.Add(title, null, (_, _) => Dispatcher.Invoke(action)); }
