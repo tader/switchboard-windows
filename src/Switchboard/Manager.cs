@@ -61,6 +61,7 @@ public sealed class Manager : IDisposable {
     private async Task Read(Process process) {
         try { while (await process.StandardOutput.ReadLineAsync() is { } line) {
             if (line.Length > 1024 * 1024) throw new Exception("Invalid manager response.");
+            var before=(Status,AccountReady,Attention,Error);
             var m = JsonDocument.Parse(line).RootElement;
             switch (m.GetProperty("event").GetString()) {
                 case "started": Status = "Running on this PC"; if (m.TryGetProperty("setupUrl", out var setup) && setup.ValueKind == JsonValueKind.String) AccountBrowserOpener(setup.GetString()!); break;
@@ -69,7 +70,7 @@ public sealed class Manager : IDisposable {
                 case "account-result": if (m.GetProperty("requestId").GetString() == accountId) account?.TrySetResult(m.Clone()); break;
                 case "error": Error = "The action could not complete. Check folders, port and the recovery journal."; break;
             }
-            Notify();
+            if(before!=(Status,AccountReady,Attention,Error))Notify();
         } } catch { Error = "The local manager disconnected. Stop and inspect the recovery journal."; }
         finally { Status = "Not running"; Notify(); }
     }

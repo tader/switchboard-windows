@@ -48,7 +48,7 @@ public static class AppUpdates {
                 command.Environment["SWITCHBOARD_VERIFY_FILE"]=verifyFile;
                 using var verification=System.Diagnostics.Process.Start(command)!;
                 _=verification.StandardOutput.ReadToEndAsync();_=verification.StandardError.ReadToEndAsync();
-                await verification.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
+                try{await verification.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));}catch{if(!verification.HasExited)verification.Kill(true);throw;}
                 if(verification.ExitCode!=0)throw new Exception("The Windows app signature is invalid.");
             }
             await updater.DownloadUpdatesAsync(update);
