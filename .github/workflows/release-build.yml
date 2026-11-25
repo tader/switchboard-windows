@@ -1,4 +1,4 @@
-name: Signed Windows release
+name: Windows release (unsigned installers)
 on:
   workflow_call:
     inputs:
@@ -8,7 +8,6 @@ on:
       tag: {description: Existing release tag, required: true}
 permissions:
   contents: write
-  id-token: write
 jobs:
   release:
     environment: windows-release
@@ -24,39 +23,27 @@ jobs:
       - name: Check release prerequisites
         shell: pwsh
         env:
-          CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
-          ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
-          PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
           FEED_KEY: ${{ secrets.UPDATE_FEED_PRIVATE_KEY }}
           TAG: ${{ inputs.tag }}
         run: |
-          foreach ($name in 'CLIENT_ID','TENANT_ID','ENDPOINT','ACCOUNT','PROFILE','FEED_KEY') { if (!(Get-Item "env:$name").Value) { throw "Missing signing prerequisite: $name" } }
+          foreach ($name in 'FEED_KEY') { if (!(Get-Item "env:$name").Value) { throw "Missing signing prerequisite: $name" } }
           if ($env:TAG -ne "v$((Get-Content version.txt).Trim())") { throw 'Release tag mismatch' }
           if (!(Test-Path Assets/update-public-key.pem)) { throw 'Missing embedded update key' }
-      - uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Build, sign and authenticate update metadata
+      - name: Build unsigned installers and authenticate update metadata
         shell: pwsh
         env:
-          ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
-          ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
-          PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
           FEED_KEY: ${{ secrets.UPDATE_FEED_PRIVATE_KEY }}
         run: |
           $version = (Get-Content version.txt).Trim()
-          dotnet publish src/Switchboard/Switchboard.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:SignedRelease=true -p:Version=$version -o .dist/app
+          dotnet publish src/Switchboard/Switchboard.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:ReleaseUpdatesEnabled=true -p:Version=$version -o .dist/app
           if ($LASTEXITCODE) { throw 'Build failed' }
           dotnet tool install vpk --version 1.2.161 --tool-path .tools
-          @{ Endpoint=$env:ENDPOINT; CodeSigningAccountName=$env:ACCOUNT; CertificateProfileName=$env:PROFILE } | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/signing.json"
-          .tools/vpk pack --packId Switchboard.Windows --packVersion $version --packDir .dist/app --mainExe Switchboard.exe --channel ${{ matrix.rid }} --runtime ${{ matrix.rid }} --icon Assets/AppIcon.ico --outputDir .dist/release --azureTrustedSignFile "$env:RUNNER_TEMP/signing.json"
-          if ($LASTEXITCODE) { throw 'Signing or packaging failed' }
+          .tools/vpk pack --packId Switchboard.Windows --packVersion $version --packDir .dist/app --mainExe Switchboard.exe --channel ${{ matrix.rid }} --runtime ${{ matrix.rid }} --icon Assets/AppIcon.ico --outputDir .dist/release
+          if ($LASTEXITCODE) { throw 'Packaging failed' }
           $installer = Get-ChildItem .dist/release/*Setup.exe | Select-Object -First 1
-          if (!$installer -or (Get-AuthenticodeSignature $installer.FullName).Status -ne 'Valid') { throw 'Installer signature validation failed' }
+          if (!$installer) { throw 'Installer missing' }
+          Rename-Item $installer.FullName "Switchboard-$version-${{ matrix.rid }}-unsigned-Setup.exe"
+          foreach ($portable in Get-ChildItem .dist/release/*Portable.zip) { Rename-Item $portable.FullName "Switchboard-$version-${{ matrix.rid }}-unsigned-Portable.zip" }
           $key = "$env:RUNNER_TEMP/feed-private.pem"
           try {
             [IO.File]::WriteAllText($key,$env:FEED_KEY)
@@ -66,7 +53,7 @@ jobs:
             openssl dgst -sha256 -verify Assets/update-public-key.pem -signature "$feed.sig" $feed
             if ($LASTEXITCODE) { throw 'Feed verification failed' }
           } finally { Remove-Item $key -Force -ErrorAction SilentlyContinue }
-      - name: Upload signed release assets
+      - name: Upload release assets with authenticated update feeds
         shell: pwsh
         env: {GH_TOKEN: '${{ github.token }}', TAG: '${{ inputs.tag }}'}
         run: gh release upload "$env:TAG" .dist/release/* --repo "${{ github.repository }}" --clobber
@@ -75,6 +62,6 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - name: Publish only after both signed architectures succeed
+      - name: Publish only after both architectures succeed
         env: {GH_TOKEN: '${{ github.token }}', TAG: '${{ inputs.tag }}', GH_REPO: '${{ github.repository }}'}
-        run: gh release edit "$TAG" --draft=false
+        run: gh release edit "$TAG" --title "Switchboard for Windows $TAG (unsigned)" --draft=false

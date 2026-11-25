@@ -2,11 +2,11 @@
 
 A native Windows 11 tray manager for a local Switchboard server, for x64 and ARM64 PCs. It uses Windows controls with the same settings organization as the macOS app.
 
-**Development status:** the first signed release is not published. Downloadable CI artifacts are unsigned development builds. A compatible Windows core runtime must be released before first setup can succeed.
+**Development status:** the first release is not published. Downloadable CI artifacts are unsigned development builds. A compatible Windows core runtime must be released before first setup can succeed. Public Windows installers are intentionally unsigned; Windows may show an unknown-publisher warning or block installation under stricter security policies.
 
 ## Setup and use
 
-Install the signed installer matching your PC from GitHub Releases. Choose **Set Up Switchboard**. The app downloads a compatible server runtime, verifies it, and opens initial account setup in your browser. No WSL, Docker, Node, .NET installation or developer tools are needed.
+Install the installer matching your PC from GitHub Releases. Choose **Set Up Switchboard**. The app downloads a compatible server runtime, verifies it, and opens initial account setup in your browser. No WSL, Docker, Node, .NET installation or developer tools are needed.
 
 Left-click the tray icon to open a running Switchboard; otherwise it opens Settings. Right-click for Open, Start, Stop, Restart, Settings, Show Logs and Quit. Closing Settings leaves the app running. Quit waits for owned server shutdown and installation cleanup.
 
@@ -28,4 +28,4 @@ If installation reports an unresolved journal, preserve both data and updater fo
 
 Use the .NET 10 SDK on Windows: `dotnet publish src/Switchboard/Switchboard.csproj -c Release -r win-x64 --self-contained true` (or `win-arm64`). CI builds both architectures and runs ownership, relocation and WPF-rendering smoke checks. Developer builds do not require release-signing credentials.
 
-See [release setup](development/releases/README.md) for signing prerequisites. App updates authenticate a P-256-signed feed and package hashes; public release packaging requires Azure Artifact Signing. Installed app files are separate from accounts, server data and updater state.
+See [release setup](development/releases/README.md) for signing prerequisites. App updates authenticate a P-256-signed feed and package hashes; public release packaging signs update metadata using the repository’s protected key, without Azure or a code-signing certificate. Installed app files are separate from accounts, server data and updater state.

@@ -13,8 +13,8 @@ Verification completed during implementation:
 
 The core dependency supplies native prepared runtimes, private graceful shutdown, Windows browser discovery and pipe ownership. Its native browser tests cover the installed browser through direct pipes and through its watchdog; no debugging TCP endpoint is used. Core changes and fixtures remain generic.
 
-## Release prerequisites still requiring owner configuration
+## Release prerequisites
 
-Azure Artifact Signing is not configured: the windows-release environment has no Azure variables yet. The update feed key is provisioned as an environment secret, paired with the embedded public key. The release environment accepts only main and version tags. Public releases remain draft until both signed architecture jobs succeed. No Azure resources were purchased or created.
+The owner chose to skip Windows code signing after Azure eligibility was checked. This supersedes the earlier Azure-signing plan. There are no Azure resources, billing or signing-profile prerequisites. Installer files and release titles explicitly identify unsigned builds; public update authenticity continues to rely on the P-256-signed feed and package hashes. The feed key is provisioned in the protected release environment.
 
-Before the first public release, publish a compatible core release containing Windows runtime assets, configure and validate the Azure Public Trust signing profile and OIDC identity, and exercise signed install/update flows and live Windows Hello recovery on a suitable Windows machine. Automated tests do not simulate a successful OS verification as proof of actual Windows Hello behavior. High contrast and increased text scaling also need an interactive final acceptance pass.
+A compatible core release with Windows assets must precede first setup. Signed-feed update installation across two real release versions, live Windows Hello verification, and final interactive accessibility acceptance still need first-release validation. Automated denial/tamper tests are not represented as proof of successful live Windows Hello or a completed public update.
