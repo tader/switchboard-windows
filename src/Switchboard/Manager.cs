@@ -23,7 +23,8 @@ public sealed class Manager : IDisposable {
     private TaskCompletionSource<bool>? stopped;
     private TaskCompletionSource<JsonElement>? account;
     private string? accountId;
-    private readonly Job job = new();
+    private Job job = new();
+    private bool disposed;
     public Action<string> AccountBrowserOpener { get; set; } = OpenUrl;
     public Manager(Settings? settings=null) {
         if(settings!=null)Settings=settings;
@@ -73,7 +74,7 @@ public sealed class Manager : IDisposable {
             }
             if(before!=(Status,AccountReady,Attention,Error))Notify();
         } } catch { Error = "The local manager disconnected. Stop and inspect the recovery journal."; }
-        finally { Status = "Not running"; Notify(); }
+        finally { if(ReferenceEquals(child,process)){job.Dispose();if(!disposed)job=new Job();}Status = "Not running"; Notify(); }
     }
     private async Task Send(object message) {
         await commands.WaitAsync(); try { if (child is { HasExited: false }) { await child.StandardInput.WriteLineAsync(JsonSerializer.Serialize(message)); await child.StandardInput.FlushAsync(); } } finally { commands.Release(); }
@@ -82,7 +83,7 @@ public sealed class Manager : IDisposable {
         if (!Running) return true;
         Session = Guid.NewGuid();
         stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        try { await Send(new { action = "quit" }); await child!.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(5)); poll.Stop(); child.Dispose(); child = null; Status = "Not running"; Notify(); return true; }
+        try { await Send(new { action = "quit" }); await child!.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(5));if(reader!=null)await reader; poll.Stop(); child.Dispose(); child = null; Status = "Not running"; Notify(); return true; }
         catch { Error = "Switchboard is still finishing an operation. Wait and retry."; Notify(); return false; }
     }
     public Task<JsonElement> Account(string action) {
@@ -116,5 +117,5 @@ public sealed class Manager : IDisposable {
         finally { Installation.Dispose(); Installation = null;CanCancelInstallation=false; }
         Settings.RuntimePath = path; Settings.Configured = true; Settings.Save(); File.Delete(Path.Combine(Settings.StatePath,"runtime-install.json")); Status = "Not running";
     }
-    public void Dispose() { poll.Stop(); job.Dispose(); child?.Dispose(); }
+    public void Dispose() { disposed=true;poll.Stop(); job.Dispose(); child?.Dispose(); }
 }
