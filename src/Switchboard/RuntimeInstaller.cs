@@ -90,7 +90,7 @@ public static class RuntimeInstaller {
             if(root && System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(file),@"^(?:[.]server-lease|controller-lease)[.]db(?:-|$)")) continue;
             var attrs=File.GetAttributes(file); if(attrs.HasFlag(FileAttributes.ReparsePoint)) throw new Exception("Snapshots require folders without reparse points.");
             var dest=Path.Combine(target,Path.GetFileName(file));
-            if(attrs.HasFlag(FileAttributes.Directory)) Copy(file,dest,false); else {File.Copy(file,dest); if(!SHA256.HashData(File.ReadAllBytes(file)).SequenceEqual(SHA256.HashData(File.ReadAllBytes(dest)))) throw new Exception("Backup verification failed.");}
+            if(attrs.HasFlag(FileAttributes.Directory)) Copy(file,dest,false); else {File.Copy(file,dest); using var saved=new FileStream(dest,FileMode.Open,FileAccess.ReadWrite,FileShare.Read);saved.Flush(true);using var original=File.OpenRead(file);if(!SHA256.HashData(original).SequenceEqual(SHA256.HashData(saved))) throw new Exception("Backup verification failed.");}
         }
     }
 }

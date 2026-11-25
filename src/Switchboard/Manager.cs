@@ -39,6 +39,7 @@ public sealed class Manager : IDisposable {
  poll.Tick += async (_, _) => { if (Running) await Send(new { action = "status" }); }; }
     public void Notify() => Changed?.Invoke();
     public static void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    public void ShowLogs() { global::Switchboard.Settings.PrivateFolder(Settings.StatePath);OpenUrl(Settings.StatePath); }
     public void Open() { if (Running) OpenUrl(Settings.BrowserUrl); }
     public async Task Start() {
         if (Busy || Running) return;

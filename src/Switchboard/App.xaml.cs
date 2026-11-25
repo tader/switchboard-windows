@@ -30,7 +30,7 @@ public partial class App : System.Windows.Application {
         var stopItem=Add("Stop", async () => await manager.Stop());
         var restartItem=Add("Restart", async () => { await manager.Stop(); await manager.Start(); });
         Add("Settings…", ShowSettings);
-        Add("Show Logs", () => Manager.OpenUrl(manager.Settings.StatePath));
+        Add("Show Logs", () => manager.ShowLogs());
         Add("Quit Switchboard", async () => { if (await manager.Shutdown()) Shutdown(); });
         var signIn=Add("Sign in to connections",()=>Manager.OpenUrl(manager.Settings.BrowserUrl.TrimEnd('/')+"/connections"));
         menu.Opening+=(_,_)=>{openItem.Enabled=manager.Running;startItem.Enabled=!manager.Running&&!manager.Busy;stopItem.Enabled=manager.Running&&!manager.Busy;restartItem.Enabled=manager.Running&&!manager.Busy;signIn.Visible=manager.Attention>0;signIn.Text=$"Sign in to connections ({manager.Attention})";};
