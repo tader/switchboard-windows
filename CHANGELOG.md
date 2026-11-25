@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/tader/switchboard-windows/compare/v0.2.0...v0.3.0) (2026-11-25)
+
+
+### Features
+
+* add secure GitHub token for release requests ([e16f619](https://github.com/tader/switchboard-windows/commit/e16f6196add6b9d15750483a3a98ef64d4d483b1))
+* add secure GitHub token for release requests ([920e25a](https://github.com/tader/switchboard-windows/commit/920e25aea2f48afbf80f2615c17b2e93b4a715d9))
+* add secure GitHub token for release requests ([a1a35a3](https://github.com/tader/switchboard-windows/commit/a1a35a313e30b8f61f1b67a8bdb49721befdeb07))
+
 ## [0.2.0](https://github.com/tader/switchboard-windows/compare/v0.1.0...v0.2.0) (2026-11-25)
 
 
