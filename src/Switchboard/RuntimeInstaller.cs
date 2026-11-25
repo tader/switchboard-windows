@@ -62,6 +62,11 @@ public static class RuntimeInstaller {
             if(File.Exists(Path.Combine(settings.DataPath,".server-lock"))) throw new Exception("A server lock remains. Preserve the folders and resolve the previous instance before installing.");
             var coreJournal=Path.Combine(settings.StatePath,"journal.json");
             if(File.Exists(coreJournal) && JsonDocument.Parse(File.ReadAllText(coreJournal)).RootElement.GetProperty("phase").GetString() is not ("succeeded" or "rolled-back" or "failed" or "cancelled")) throw new Exception("Resolve the updater recovery journal before selecting a runtime.");
+            var control=Path.Combine(settings.DataPath,"update-control.json");
+            if(File.Exists(control)) {
+                var state=JsonDocument.Parse(File.ReadAllText(control)).RootElement;
+                if(state.TryGetProperty("job",out var job)&&job.ValueKind==JsonValueKind.Object&&job.TryGetProperty("state",out var phase)&&phase.GetString() is not ("succeeded" or "rolled-back" or "failed" or "cancelled"))throw new Exception("Cancel or recover the existing server update before installing another runtime.");
+            }
             var backup=Path.Combine(settings.StatePath,"backups",Guid.NewGuid().ToString()); Copy(settings.DataPath,backup);
             var rehearsal=Path.Combine(settings.StatePath,"rehearsal-"+Guid.NewGuid()); Copy(backup,rehearsal);
             try {
