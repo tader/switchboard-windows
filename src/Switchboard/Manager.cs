@@ -11,7 +11,8 @@ public sealed class Manager : IDisposable {
     public Guid Session { get; private set; } = Guid.NewGuid();
     public bool Busy { get; private set; }
     public bool CanCancelInstallation {get;private set;}
-    public string RuntimeVersion {get {try {return JsonDocument.Parse(File.ReadAllText(Path.Combine(Settings.RuntimePath!,"runtime.json"))).RootElement.GetProperty("version").GetString()!;}catch{return "Not installed";}}}
+    public string UpdateState {get;private set;}="";
+    public string RuntimeVersion {get {try {var pointer=Path.Combine(Settings.StatePath,"current.json");var runtime=File.Exists(pointer)?JsonDocument.Parse(File.ReadAllText(pointer)).RootElement.GetProperty("release").GetString():Settings.RuntimePath;return JsonDocument.Parse(File.ReadAllText(Path.Combine(runtime!,"runtime.json"))).RootElement.GetProperty("version").GetString()!;}catch{return "Not installed";}}}
     public int Attention { get; private set; }
     public bool AccountReady { get; private set; }
     public event Action? Changed;
@@ -64,16 +65,16 @@ public sealed class Manager : IDisposable {
     private async Task Read(Process process) {
         try { while (await process.StandardOutput.ReadLineAsync() is { } line) {
             if (line.Length > 1024 * 1024) throw new Exception("Invalid manager response.");
-            var before=(Status,AccountReady,Attention,Error);
+            var before=(Status,AccountReady,Attention,Error,UpdateState);
             var m = JsonDocument.Parse(line).RootElement;
             switch (m.GetProperty("event").GetString()) {
                 case "started": Status = "Running on this PC"; if (m.TryGetProperty("setupUrl", out var setup) && setup.ValueKind == JsonValueKind.String) AccountBrowserOpener(setup.GetString()!); break;
-                case "status": AccountReady = m.TryGetProperty("ready", out var ready) && ready.GetBoolean(); Attention = m.TryGetProperty("attention", out var attention) ? attention.GetInt32() : 0; break;
+                case "status": UpdateState=m.TryGetProperty("job",out var jobState)&&jobState.ValueKind==JsonValueKind.Object&&jobState.TryGetProperty("state",out var jobPhase)?jobPhase.GetString()??"":"";AccountReady = m.TryGetProperty("ready", out var ready) && ready.GetBoolean(); Attention = m.TryGetProperty("attention", out var attention) ? attention.GetInt32() : 0; break;
                 case "stopped": Status = "Not running"; stopped?.TrySetResult(true); break;
                 case "account-result": if (m.GetProperty("requestId").GetString() == accountId) account?.TrySetResult(m.Clone()); break;
                 case "error": Error = "The action could not complete. Check folders, port and the recovery journal."; break;
             }
-            if(before!=(Status,AccountReady,Attention,Error))Notify();
+            if(before!=(Status,AccountReady,Attention,Error,UpdateState))Notify();
         } } catch { Error = "The local manager disconnected. Stop and inspect the recovery journal."; }
         finally { if(ReferenceEquals(child,process)){job.Dispose();if(!disposed)job=new Job();}Status = "Not running"; Notify(); }
     }
@@ -87,6 +88,7 @@ public sealed class Manager : IDisposable {
         try { await Send(new { action = "quit" }); await child!.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(5));if(reader!=null)await reader; poll.Stop(); child.Dispose(); child = null; Status = "Not running"; Notify(); return true; }
         catch { Error = "Switchboard is still finishing an operation. Wait and retry."; Notify(); return false; }
     }
+    public Task CancelServerUpdate()=>Send(new {action="cancel"});
     public Task<JsonElement> Account(string action) {
         if(action is not ("account-users" or "account-setup"))throw new Exception("This account action requires fresh Windows verification.");
         return AccountAction(action);
