@@ -15,9 +15,10 @@ public static class AppUpdates {
         busy = true;
         string? temporary = null;
         try {
+            if(!new UpdateManager("https://github.com/tader/switchboard-windows/releases/latest/download/").IsInstalled){if(!automatic)System.Windows.MessageBox.Show(owner,"App updates are disabled in unsigned development builds.","Windows app updates");return;}
             var keyStream = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/update-public-key.pem"));
             if (keyStream == null) { if (!automatic) System.Windows.MessageBox.Show(owner,"App updates are not configured for this development build.","Windows app updates"); return; }
-            var channel = "win-" + RuntimeInstaller.Arch;
+            var channel = "win-" + (System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64");
             var prefix = "https://github.com/tader/switchboard-windows/releases/latest/download/";
             var feed = await client.GetByteArrayAsync(prefix + "releases." + channel + ".json");
             var signature = await client.GetByteArrayAsync(prefix + "releases." + channel + ".json.sig");

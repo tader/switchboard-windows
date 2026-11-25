@@ -7,6 +7,8 @@ using System.IO;
 class Program {
     static void Require(bool value,string message){if(!value)throw new Exception(message);}
     [STAThread] static int Main(string[] args) {
+        using var deadline=new System.Threading.Timer(_=>Environment.FailFast("Smoke test deadline exceeded"),null,TimeSpan.FromMinutes(3),Timeout.InfiniteTimeSpan);
+        Console.WriteLine("Starting ownership smoke checks");
         var root=Path.Combine(Path.GetTempPath(),"switchboard-windows-smoke-"+Guid.NewGuid());Directory.CreateDirectory(root);
         try {
             var settings=new Settings{DataPath=Path.Combine(root,"Data"),StatePath=Path.Combine(root,"Updater")};settings.Validate();
@@ -27,6 +29,7 @@ class Program {
                 var feed=System.Text.Encoding.UTF8.GetBytes("synthetic update feed");var signature=key.SignData(feed,System.Security.Cryptography.HashAlgorithmName.SHA256,System.Security.Cryptography.DSASignatureFormat.Rfc3279DerSequence);
                 Require(AppUpdates.VerifyFeed(feed,signature,key.ExportSubjectPublicKeyInfoPem()),"Valid feed signature rejected");feed[0]^=1;Require(!AppUpdates.VerifyFeed(feed,signature,key.ExportSubjectPublicKeyInfoPem()),"Tampered feed accepted");
             }
+            Console.WriteLine("Starting WPF render smoke checks");
             var app=new System.Windows.Application();app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.xaml")});
             using var manager=new Manager();var window=new MainWindow(manager);window.Show();window.UpdateLayout();
             var directory=args.Length>0?args[0]:root;Directory.CreateDirectory(directory);

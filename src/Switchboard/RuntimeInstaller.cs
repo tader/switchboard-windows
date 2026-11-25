@@ -12,7 +12,7 @@ public static class RuntimeInstaller {
     public static string Arch => RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64";
     private static readonly HttpClient client = new() { Timeout = TimeSpan.FromMinutes(10), DefaultRequestHeaders = { { "User-Agent", "switchboard-windows" } } };
     public static async Task<JsonElement[]> Releases() => JsonSerializer.Deserialize<JsonElement[]>(await client.GetStringAsync("https://api.github.com/repos/tader/switchboard/releases?per_page=100"))!;
-    public static SqliteConnection Lease(string file) { var db = new SqliteConnection($"Data Source={file};Default Timeout=0"); db.Open(); using var cmd = db.CreateCommand(); cmd.CommandText = "CREATE TABLE IF NOT EXISTS lease(id INTEGER); BEGIN EXCLUSIVE;"; cmd.ExecuteNonQuery(); return db; }
+    public static SqliteConnection Lease(string file) { var db = new SqliteConnection($"Data Source={file};Default Timeout=1;Pooling=False"); db.Open(); using var cmd = db.CreateCommand(); cmd.CommandText = "CREATE TABLE IF NOT EXISTS lease(id INTEGER); BEGIN EXCLUSIVE;"; cmd.ExecuteNonQuery(); return db; }
     public static async Task<string> Install(Settings settings, Action<string> progress, CancellationToken cancellation = default) {
         settings.Validate(); Settings.PrivateFolder(settings.StatePath);
         var releases = await Releases();
