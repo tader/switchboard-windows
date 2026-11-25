@@ -49,8 +49,10 @@ public sealed class Manager : IDisposable {
         await Work(async () => {
             if (Settings.RuntimePath == null) await InstallCore();
             Settings.Validate(); global::Switchboard.Settings.PrivateFolder(Settings.DataPath); global::Switchboard.Settings.PrivateFolder(Settings.StatePath);
+            var serverEnvironment = GithubApi.ServerEnvironment(Settings, new GithubTokenStore().Read());
             var start = new ProcessStartInfo(Path.Combine(Settings.RuntimePath!, "bin", "node.exe")) { WorkingDirectory = Settings.RuntimePath!, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
             start.ArgumentList.Add("--disable-warning=ExperimentalWarning"); start.ArgumentList.Add("updater/desktop.ts");
+            start.Environment.Remove("SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN");
             start.Environment.Remove("NODE_OPTIONS"); start.Environment.Remove("NODE_PATH");
             Session = Guid.NewGuid();
             child = Process.Start(start) ?? throw new Exception("Could not start Switchboard.");
@@ -58,7 +60,7 @@ public sealed class Manager : IDisposable {
             // Never forward raw stderr, IPC payloads or setup links into logs.
             _ = child.StandardError.ReadToEndAsync();
             reader = Read(child);
-            await Send(new { action = "start", settings = new { instance = "local-manager", mode = "runtime", dataDir = Settings.DataPath, stateDir = Settings.StatePath, initialRelease = Settings.RuntimePath, appUrl = Settings.ControlUrl, env = new Dictionary<string,string> { ["SWITCHBOARD_HOST"] = Settings.Host, ["SWITCHBOARD_PORT"] = Settings.Port.ToString(), ["SWITCHBOARD_PUBLIC_URL"] = Settings.ControlUrl, ["SWITCHBOARD_LOCAL_ACCOUNT_RECOVERY"] = "1" } } });
+            await Send(new { action = "start", settings = new { instance = "local-manager", mode = "runtime", dataDir = Settings.DataPath, stateDir = Settings.StatePath, initialRelease = Settings.RuntimePath, appUrl = Settings.ControlUrl, env = serverEnvironment } });
             Status = "Starting…"; poll.Start();
         });
     }
