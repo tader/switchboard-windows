@@ -11,7 +11,7 @@ namespace Switchboard;
 public static class RuntimeInstaller {
     public static string Arch => RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64";
     private static readonly HttpClient client = new() { Timeout = TimeSpan.FromMinutes(10), DefaultRequestHeaders = { { "User-Agent", "switchboard-windows" } } };
-    public static async Task<JsonElement[]> Releases(int page=1,CancellationToken cancellation=default) => JsonSerializer.Deserialize<JsonElement[]>(await client.GetStringAsync("https://api.github.com/repos/tader/switchboard/releases?per_page=100&page="+page,cancellation))!;
+    public static async Task<JsonElement[]> Releases(int page=1,CancellationToken cancellation=default) => JsonSerializer.Deserialize<JsonElement[]>(await GithubApi.Get("https://api.github.com/repos/tader/switchboard/releases?per_page=100&page="+page,cancellation))!;
     public static SqliteConnection Lease(string file) { var db = new SqliteConnection($"Data Source={file};Default Timeout=1;Pooling=False"); db.Open(); using var cmd = db.CreateCommand(); cmd.CommandText = "CREATE TABLE IF NOT EXISTS lease(id INTEGER); BEGIN EXCLUSIVE;"; cmd.ExecuteNonQuery(); return db; }
     public static async Task<string> Install(Settings settings, Action<string> progress, CancellationToken cancellation = default) {
         settings.Validate(); Settings.PrivateFolder(settings.StatePath);
@@ -25,7 +25,7 @@ public static class RuntimeInstaller {
         var revision = manifest.GetProperty("revision").GetString()!;
         var archiveName = $"switchboard-runtime-win32-{Arch}.tar.gz";
         if (manifest.GetProperty("origin").GetString() != "tader/switchboard" || manifest.GetProperty("platform").GetString() != "win32" || manifest.GetProperty("arch").GetString() != Arch || manifest.GetProperty("version").GetString() != tag.TrimStart('v') || manifest.GetProperty("protocol").GetInt32() != 1 || manifest.GetProperty("archive").GetString() != archiveName || !System.Text.RegularExpressions.Regex.IsMatch(revision, "^[a-f0-9]{40}$")) throw new Exception("Incompatible runtime metadata.");
-        var commit = JsonDocument.Parse(await client.GetStringAsync("https://api.github.com/repos/tader/switchboard/commits/" + Uri.EscapeDataString(tag))).RootElement;
+        var commit = JsonDocument.Parse(await GithubApi.Get("https://api.github.com/repos/tader/switchboard/commits/" + Uri.EscapeDataString(tag), cancellation)).RootElement;
         if (commit.GetProperty("sha").GetString() != revision) throw new Exception("Release revision does not match its runtime.");
         var stage = Path.Combine(settings.StatePath, "releases", Guid.NewGuid() + ".partial"); Settings.PrivateFolder(stage);
         try {

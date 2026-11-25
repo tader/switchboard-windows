@@ -7,6 +7,8 @@ namespace Switchboard;
 public sealed class MainWindow : Window {
     readonly Manager manager; readonly StackPanel body=new(){Margin=new Thickness(24)};
     bool advanced;
+    string tokenDraft="";
+    bool tokenSaving;
     int releasePage=1;
     readonly List<string> versionTags=new();
     public MainWindow(Manager model) {manager=model;Title="Switchboard";Width=600;Height=760;MinWidth=460;MinHeight=500;Content=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};Microsoft.Win32.SystemEvents.UserPreferenceChanged+=(_,_)=>Dispatcher.Invoke(Refresh);SizeChanged+=(_,_)=>Refresh();Closing+=(_,e)=>{e.Cancel=true;Hide();};Refresh();}
@@ -15,7 +17,7 @@ public sealed class MainWindow : Window {
     void Toggle(string label,bool value,Action<bool> change) {var c=new CheckBox{Content=label,IsChecked=value,Margin=new Thickness(0,8,0,8)};c.Click+=(_,_)=>{change(c.IsChecked==true);manager.Settings.Save();};body.Children.Add(c);}
     public void Refresh() {
         Dispatcher.Invoke(()=>{
-            if (System.Windows.Input.Keyboard.FocusedElement is TextBox) return;
+            if (System.Windows.Input.Keyboard.FocusedElement is TextBox or PasswordBox) return;
             var theme=System.Windows.Application.Current.ThemeMode;
             var dark=theme==System.Windows.ThemeMode.Dark || theme==System.Windows.ThemeMode.System && (int?)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize","AppsUseLightTheme",1)==0;
             Background=SystemParameters.HighContrast?SystemColors.WindowBrush:new SolidColorBrush(dark?Color.FromRgb(32,32,32):Color.FromRgb(250,250,250));
@@ -43,6 +45,7 @@ public sealed class MainWindow : Window {
                 Toggle("Open app when I sign in to Windows",key?.GetValue("Switchboard")!=null,v=>{using var run=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");if(v)run.SetValue("Switchboard","\""+Environment.ProcessPath+"\"");else run.DeleteValue("Switchboard",false);});
                 Button("Open Windows Startup Apps",()=>{Manager.OpenUrl("ms-settings:startupapps");return Task.CompletedTask;});
                 Text("Updates",true);
+                TokenSettings();
                 var panels=new Grid();if(ActualWidth<560){panels.RowDefinitions.Add(new());panels.RowDefinitions.Add(new());}else{panels.ColumnDefinitions.Add(new());panels.ColumnDefinitions.Add(new());}body.Children.Add(panels);
                 var app=new StackPanel{Margin=new Thickness(0,0,16,0)};app.Children.Add(new TextBlock{Text="Windows app",FontWeight=FontWeights.SemiBold});app.Children.Add(new TextBlock{Text="The tray app on this PC.",TextWrapping=TextWrapping.Wrap});app.Children.Add(new TextBlock{Text="Version: "+System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)});
                 var automatic=new CheckBox{Content="Check automatically",IsChecked=manager.Settings.AutomaticAppChecks,Margin=new Thickness(0,10,0,0)};System.Windows.Automation.AutomationProperties.SetName(automatic,"Check for app updates automatically");automatic.Click+=(_,_)=>{manager.Settings.AutomaticAppChecks=automatic.IsChecked==true;manager.Settings.Save();};app.Children.Add(automatic);
@@ -66,6 +69,21 @@ public sealed class MainWindow : Window {
             Button(advanced?"Back to Settings":"Advanced…",()=>{advanced=!advanced;Refresh();return Task.CompletedTask;});Text("Closing this window keeps Switchboard running.");
         });
     }
+    void TokenSettings() {
+        Text("GitHub token");
+        Text("Optional. Raises limits for desktop release checks and plugin installation. Stored in Windows Credential Manager.");
+        try { Text(new GithubTokenStore().Read()==null ? "No token configured." : "Token configured."); }
+        catch(Exception e) { Text(e.Message); }
+        var box=new PasswordBox { Password=tokenDraft, IsEnabled=!manager.Busy&&!tokenSaving, Margin=new Thickness(0,6,0,6) };
+        System.Windows.Automation.AutomationProperties.SetName(box,"GitHub token");
+        box.PasswordChanged+=(_,_)=>tokenDraft=box.Password;
+        body.Children.Add(box);
+        Button("Save Token",async()=>{if(tokenSaving)return;var value=tokenDraft;tokenSaving=true;box.IsEnabled=false;try{await Task.Run(()=>new GithubTokenStore().Save(value));tokenDraft="";box.Clear();}finally{tokenSaving=false;box.IsEnabled=!manager.Busy;}},!manager.Busy&&!tokenSaving);
+        Button("Remove Token",async()=>{if(tokenSaving)return;tokenSaving=true;try{await Task.Run(()=>new GithubTokenStore().Remove());tokenDraft="";box.Clear();}finally{tokenSaving=false;box.IsEnabled=!manager.Busy;}},!manager.Busy&&!tokenSaving);
+        Button("Create a GitHub token…",()=>{Manager.OpenUrl("https://github.com/settings/personal-access-tokens/new");return Task.CompletedTask;});
+        Text("Choose public repositories only; no additional permissions are needed. Server use is limited to installation, including catalogs and dependencies. Plugin and server update checks use their existing credentials.");
+        if(manager.Running)Text("Token changes apply to desktop requests immediately. Stop and start Switchboard to apply them to plugin installation. Server support requires an updated runtime.");
+    }
     async Task LoadVersions(ComboBox box){try{
         box.IsEnabled=false;
         var rows=await RuntimeInstaller.Releases(releasePage);
@@ -73,7 +91,7 @@ public sealed class MainWindow : Window {
         box.ItemsSource=versionTags.Distinct().ToArray();box.SelectedItem=manager.Settings.Pin;
         box.SelectionChanged+=(_,_)=>{if(box.SelectedItem is string tag){manager.Settings.Pin=tag;manager.Settings.Save();}};
         if(box.SelectedIndex<0&&versionTags.Count>0)box.SelectedIndex=0;box.IsEnabled=true;
-    }catch{box.IsEnabled=false;}}
+    }catch(Exception e){box.IsEnabled=false;Text(e.Message);}}
 
     async Task Recover(){
         var result=await manager.Account("account-users");var users=result.GetProperty("users").EnumerateArray().ToArray();

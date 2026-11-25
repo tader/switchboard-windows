@@ -29,3 +29,9 @@ If installation reports an unresolved journal, preserve both data and updater fo
 Use the .NET 10 SDK on Windows: `dotnet publish src/Switchboard/Switchboard.csproj -c Release -r win-x64 --self-contained true` (or `win-arm64`). CI builds both architectures and runs ownership, relocation and WPF-rendering smoke checks. Developer builds do not require release-signing credentials.
 
 See [release setup](development/releases/README.md) for signing prerequisites. App updates authenticate a P-256-signed feed and package hashes; public release packaging signs update metadata using the repository’s protected key, without Azure or a code-signing certificate. Installed app files are separate from accounts, server data and updater state.
+
+### GitHub rate limits
+
+In **Settings → Updates**, optionally save a GitHub personal access token before or after setup. The token is masked while entering and stored for your Windows user in Credential Manager. Choose public repositories only with no additional permissions; see [GitHub token setup](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). Use **Save Token** to replace it or **Remove Token** to return to anonymous requests.
+
+The app uses it for server release listings and revision verification. An updated server runtime also uses it only after a rate-limit response during plugin installation, including catalog browsing and dependencies. It is not used for plugin updates, plugin update checks, server updates or a GitHub connection. Token changes affect new desktop requests immediately; stop and start the local server to apply changes there. Older server runtimes ignore the installation token.

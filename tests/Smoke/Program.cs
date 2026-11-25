@@ -30,10 +30,47 @@ class Program {
                 var feed=System.Text.Encoding.UTF8.GetBytes("synthetic update feed");var signature=key.SignData(feed,System.Security.Cryptography.HashAlgorithmName.SHA256,System.Security.Cryptography.DSASignatureFormat.Rfc3279DerSequence);
                 Require(AppUpdates.VerifyFeed(feed,signature,key.ExportSubjectPublicKeyInfoPem()),"Valid feed signature rejected");feed[0]^=1;Require(!AppUpdates.VerifyFeed(feed,signature,key.ExportSubjectPublicKeyInfoPem()),"Tampered feed accepted");
             }
+            Console.WriteLine("Starting GitHub token checks");
+            const string syntheticToken="synthetic-token-value";
+            Require(GithubTokenStore.Validate("  "+syntheticToken+"\r\n")==syntheticToken,"Token trimming failed");
+            foreach(var invalid in new[]{"", "two tokens", "injected\r\nheader",new string('a',2561)}) {
+                try{GithubTokenStore.Validate(invalid);throw new Exception("Invalid token accepted");}catch(Exception e){Require(e.Message.StartsWith("Enter a GitHub token"),"Wrong token validation result");}
+            }
+            var store=new GithubTokenStore("Switchboard/Test/"+Guid.NewGuid());
+            try {
+                Require(store.Read()==null,"Isolated test credential already exists");store.Save(syntheticToken);
+                Require(store.Read()==syntheticToken,"Credential reload failed");store.Save("replacement-token");
+                Require(store.Read()=="replacement-token","Credential replacement failed");store.Remove();store.Remove();
+                Require(store.Read()==null,"Credential removal failed");
+            } finally {store.Remove();}
+            using(var authenticated=GithubApi.Request(new Uri("https://api.github.com/repos/sample/public/releases"),syntheticToken))
+                Require(authenticated.Headers.Authorization?.ToString()=="Bearer "+syntheticToken,"GitHub authorization missing");
+            using(var anonymous=GithubApi.Request(new Uri("https://api.github.com/repos/sample/public/releases"),null))
+                Require(anonymous.Headers.Authorization==null,"Anonymous request acquired credentials");
+            foreach(var url in new[]{"http://api.github.com/x","https://github.com/x","https://api.github.com.example/x","https://api.github.com:8443/x","https://user@api.github.com/x"}) {
+                try{using var invalid=GithubApi.Request(new Uri(url),syntheticToken);throw new Exception("Untrusted origin accepted");}catch(Exception e){Require(e.Message=="Untrusted GitHub API origin.","Wrong origin error");}
+            }
+            using(var unauthorized=new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized))
+                Require(GithubApi.Error(unauthorized).Contains("Replace or remove"),"Missing token recovery advice");
+            using(var limited=new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.Forbidden)) {
+                limited.Headers.Add("x-ratelimit-remaining","0");limited.Headers.Add("retry-after","60");
+                Require(GithubApi.Error(limited).Contains("60 seconds"),"Rate-limit retry timing missing");
+            }
+            using(var missing=new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.NotFound))
+                Require(GithubApi.Error(missing).Contains("not found"),"Missing release error wrong");
+            var tokenEnv=GithubApi.ServerEnvironment(settings,syntheticToken);
+            Require(tokenEnv["SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN"]==syntheticToken && !tokenEnv.ContainsKey("SWITCHBOARD_GITHUB_TOKEN"),"Server credential scope wrong");
+            Require(!GithubApi.ServerEnvironment(settings,null).ContainsKey("SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN"),"Removed token forwarded");
+            Require(!System.Text.Json.JsonSerializer.Serialize(settings).Contains(syntheticToken),"Token leaked into settings");
             Console.WriteLine("Starting WPF render smoke checks");
             var app=new System.Windows.Application();app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.xaml")});
             using var manager=new Manager();var window=new MainWindow(manager);window.Show();window.UpdateLayout();
             IEnumerable<System.Windows.DependencyObject> Descendants(System.Windows.DependencyObject parent){for(var i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++){var child=VisualTreeHelper.GetChild(parent,i);yield return child;foreach(var nested in Descendants(child))yield return nested;}}
+            Require(Descendants(window).OfType<PasswordBox>().Any(),"Masked token entry missing");
+            var entry=Descendants(window).OfType<PasswordBox>().Single();entry.Password="synthetic-unsaved-draft";
+            System.Windows.Input.Keyboard.ClearFocus();window.Refresh();window.UpdateLayout();
+            Require(Descendants(window).OfType<PasswordBox>().Single().Password=="synthetic-unsaved-draft","Token draft lost during refresh");
+            Descendants(window).OfType<PasswordBox>().Single().Clear();
             Require(Descendants(window).OfType<TextBlock>().Any(t=>t.Text=="Server"),"Server update panel is missing");
             Require(Descendants(window).OfType<TextBlock>().Any(t=>t.Text=="Windows app"),"App update panel is missing");
             var directory=args.Length>0?args[0]:root;Directory.CreateDirectory(directory);
