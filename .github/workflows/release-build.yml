@@ -49,7 +49,7 @@ jobs:
           FEED_KEY: ${{ secrets.UPDATE_FEED_PRIVATE_KEY }}
         run: |
           $version = (Get-Content version.txt).Trim()
-          dotnet publish src/Switchboard/Switchboard.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:Version=$version -o .dist/app
+          dotnet publish src/Switchboard/Switchboard.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:SignedRelease=true -p:Version=$version -o .dist/app
           if ($LASTEXITCODE) { throw 'Build failed' }
           dotnet tool install vpk --version 1.2.161 --tool-path .tools
           @{ Endpoint=$env:ENDPOINT; CodeSigningAccountName=$env:ACCOUNT; CertificateProfileName=$env:PROFILE } | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/signing.json"

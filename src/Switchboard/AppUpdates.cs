@@ -8,9 +8,16 @@ namespace Switchboard;
 public static class AppUpdates {
     private static readonly HttpClient client = new() { Timeout = TimeSpan.FromMinutes(10) };
     private static bool busy;
+#if SIGNED_RELEASE
+    private static readonly bool enabled=true;
+#else
+    private static readonly bool enabled=false;
+#endif
+
     public static bool VerifyFeed(byte[] data, byte[] signature, string pem) {using var key=ECDsa.Create();key.ImportFromPem(pem);return key.VerifyData(data,signature,HashAlgorithmName.SHA256,DSASignatureFormat.Rfc3279DerSequence);}
 
     public static async Task Check(Window owner, Manager manager, bool automatic = false) {
+        if(!enabled){if(!automatic)System.Windows.MessageBox.Show(owner,"App updates are disabled in unsigned development builds.","Windows app updates");return;}
         if (busy || manager.Busy) return;
         busy = true;
         string? temporary = null;
