@@ -42,6 +42,12 @@ jobs:
           New-Item -ItemType Directory -Force .core-contract/bin | Out-Null
           Copy-Item (Get-Command node).Source .core-contract/bin/node.exe
       - run: dotnet run --project tests/Smoke/Smoke.csproj -c Release -- .dist/screenshots .core-contract
+      - name: Package unsigned development installer
+        shell: pwsh
+        run: |
+          dotnet tool install vpk --version 1.2.161 --tool-path .tools
+          .tools/vpk pack --packId Switchboard.Windows --packVersion 0.1.0 --packDir .dist/${{ matrix.rid }} --mainExe Switchboard.exe --channel ${{ matrix.rid }} --runtime ${{ matrix.rid }} --icon Assets/AppIcon.ico --outputDir .dist/installer-${{ matrix.rid }}
+          if ($LASTEXITCODE) { throw 'Development packaging failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: {name: 'Switchboard-${{ matrix.rid }}-unsigned-development', path: '.dist/'}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
