@@ -27,9 +27,16 @@ public sealed class MainWindow : Window {
             if(!advanced){
                 Button(manager.Running?"Open Switchboard":manager.Settings.Configured?"Start Switchboard":"Set Up Switchboard",async()=>{if(manager.Running)manager.Open();else await manager.Start();},!manager.Busy);
                 if(manager.Running)Button("Stop",async()=>{await manager.Stop();},!manager.Busy);
-                Text("Account",true);Text(manager.AccountReady?"Your account is ready.":"Create your account in your browser after starting Switchboard.");
-                Button("Continue Account Setup",async()=>{var r=await manager.Account("account-setup");if(r.TryGetProperty("setupUrl",out var u)&&u.ValueKind==System.Text.Json.JsonValueKind.String)Manager.OpenUrl(u.GetString()!);},manager.Running);
-                Button("Recover Password…",Recover,manager.Running&&!manager.Busy);
+                if(!manager.Settings.Configured)Text("Set up Switchboard to download the server and create your account in your browser. The recommended settings are ready.");
+                Text("Account",true);
+                if(manager.Running){
+                    Text(manager.AccountReady?"Your account is ready.":"Finish creating your account in your browser.");
+                    if(!manager.AccountReady)Button("Continue Account Setup",async()=>{var r=await manager.Account("account-setup");if(r.TryGetProperty("setupUrl",out var u)&&u.ValueKind==System.Text.Json.JsonValueKind.String)Manager.OpenUrl(u.GetString()!);});
+                    Button("Recover Password…",Recover,!manager.Busy);
+                }else{
+                    Text("Start Switchboard to access your account.");
+                    if(manager.Settings.Configured)Button("Start & Continue to Recovery…",async()=>{await manager.Start();if(manager.Running)await Recover();},!manager.Busy);
+                }
                 if(manager.Attention>0)Button($"Sign in to connections ({manager.Attention})",()=>{Manager.OpenUrl(manager.Settings.BrowserUrl.TrimEnd('/')+"/connections");return Task.CompletedTask;});
                 Text("Startup",true);Toggle("Start Switchboard when the app opens",manager.Settings.StartServer,v=>manager.Settings.StartServer=v);
                 using var key=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
