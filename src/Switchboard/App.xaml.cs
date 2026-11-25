@@ -8,6 +8,7 @@ public partial class App : System.Windows.Application {
     private Manager? manager;
     private MainWindow? settings;
     protected override void OnStartup(StartupEventArgs e) {
+        Velopack.VelopackApp.Build().SetAutoApplyOnStartup(false).Run();
         base.OnStartup(e);
         mutex = new Mutex(true, "Local\\Switchboard-" + System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value, out var first);
         if (!first) { Shutdown(); return; }
