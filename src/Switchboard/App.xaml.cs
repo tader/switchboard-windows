@@ -21,7 +21,7 @@ public partial class App : System.Windows.Application {
         async Task CheckUpdates() { if (manager.Settings.AutomaticAppChecks) { settings ??= new MainWindow(manager); await AppUpdates.Check(settings, manager, true); } }
         updateTimer.Tick += async (_, _) => await CheckUpdates(); updateTimer.Start();
         _ = Dispatcher.InvokeAsync(async () => { await Task.Delay(10000); await CheckUpdates(); });
-        _=Task.Run(async()=>{while(!activationStop.IsCancellationRequested){try{using var pipe=new System.IO.Pipes.NamedPipeServerStream(pipeName,System.IO.Pipes.PipeDirection.In,1,System.IO.Pipes.PipeTransmissionMode.Byte,System.IO.Pipes.PipeOptions.Asynchronous|System.IO.Pipes.PipeOptions.CurrentUserOnly);await pipe.WaitForConnectionAsync(activationStop.Token);var bytes=new byte[32];var read=await pipe.ReadAsync(bytes,activationStop.Token);if(System.Text.Encoding.UTF8.GetString(bytes,0,read)=="show-settings")Dispatcher.BeginInvoke(ShowSettings);}catch(OperationCanceledException){break;}catch(System.IO.IOException){}}});
+        _=Task.Run(async()=>{while(!activationStop.IsCancellationRequested){try{using var pipe=new System.IO.Pipes.NamedPipeServerStream(pipeName,System.IO.Pipes.PipeDirection.In,1,System.IO.Pipes.PipeTransmissionMode.Byte,System.IO.Pipes.PipeOptions.Asynchronous|System.IO.Pipes.PipeOptions.CurrentUserOnly);await pipe.WaitForConnectionAsync(activationStop.Token);var bytes=new byte[32];var read=await pipe.ReadAsync(bytes,activationStop.Token);if(System.Text.Encoding.UTF8.GetString(bytes,0,read)=="show-settings")_ = Dispatcher.InvokeAsync(ShowSettings);}catch(OperationCanceledException){break;}catch(System.IO.IOException){}}});
         tray = new Forms.NotifyIcon { Icon = new System.Drawing.Icon(System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/AppIcon.ico"))!.Stream), Text = "Switchboard", Visible = true };
         var menu = new Forms.ContextMenuStrip();
         Forms.ToolStripItem Add(string title, Action action) => menu.Items.Add(title, null, (_, _) => Dispatcher.Invoke(action));
@@ -40,6 +40,6 @@ public partial class App : System.Windows.Application {
         if (!manager.Settings.Configured || e.Args.Contains("--show-settings")) ShowSettings();
         if (manager.Settings.Configured && manager.Settings.StartServer) _ = manager.Start();
     }
-    private void ShowSettings() { settings ??= new MainWindow(manager!); settings.Show(); settings.WindowState = WindowState.Normal; settings.Activate(); }
+    private void ShowSettings() { settings ??= new MainWindow(manager!); settings.Refresh(); settings.Show(); settings.WindowState = WindowState.Normal; settings.Activate(); }
     protected override void OnExit(ExitEventArgs e) { activationStop.Cancel(); tray?.Dispose(); manager?.Dispose(); mutex?.Dispose(); base.OnExit(e); }
 }
