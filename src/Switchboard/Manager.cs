@@ -9,6 +9,8 @@ public sealed class Manager : IDisposable {
     public bool Running => child is { HasExited: false };
     public Guid Session { get; private set; } = Guid.NewGuid();
     public bool Busy { get; private set; }
+    public bool CanCancelInstallation {get;private set;}
+    public string RuntimeVersion {get {try {return JsonDocument.Parse(File.ReadAllText(Path.Combine(Settings.RuntimePath!,"runtime.json"))).RootElement.GetProperty("version").GetString()!;}catch{return "Not installed";}}}
     public int Attention { get; private set; }
     public bool AccountReady { get; private set; }
     public event Action? Changed;
@@ -94,10 +96,10 @@ public sealed class Manager : IDisposable {
     private async Task RunWork(Func<Task> action) { if (Busy) return; Busy = true; Error = null; Notify(); try { await action(); } catch (Exception e) { Error = e.Message; } finally { Busy = false; Notify(); } }
     public async Task InstallCore() {
         if (Running && !await Stop()) return;
-        Installation = new CancellationTokenSource();
+        Installation = new CancellationTokenSource();CanCancelInstallation=true;
         string path;
-        try { path = await Task.Run(() => RuntimeInstaller.Install(Settings, text => { Status = text; Notify(); }, Installation.Token)); }
-        finally { Installation.Dispose(); Installation = null; }
+        try { path = await Task.Run(() => RuntimeInstaller.Install(Settings, text => { Status = text;if(text=="Finishing installation…")CanCancelInstallation=false; Notify(); }, Installation.Token)); }
+        finally { Installation.Dispose(); Installation = null;CanCancelInstallation=false; }
         Settings.RuntimePath = path; Settings.Configured = true; Settings.Save(); File.Delete(Path.Combine(Settings.StatePath,"runtime-install.json")); Status = "Not running";
     }
     public void Dispose() { poll.Stop(); job.Dispose(); child?.Dispose(); }

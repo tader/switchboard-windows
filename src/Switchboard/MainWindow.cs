@@ -16,7 +16,7 @@ public sealed class MainWindow : Window {
             if (System.Windows.Input.Keyboard.FocusedElement is TextBox) return;
             body.Children.Clear();Text(advanced?"Advanced Settings":"Switchboard",true);Text(manager.Status);
             if(manager.Error!=null) Text(manager.Error);
-            if(manager.Installation!=null) Button("Cancel Installation",()=>{manager.Installation.Cancel();return Task.CompletedTask;});
+            if(manager.Installation!=null && manager.CanCancelInstallation) Button("Cancel Installation",()=>{manager.Installation.Cancel();return Task.CompletedTask;});
             if(!advanced){
                 Button(manager.Running?"Open Switchboard":manager.Settings.Configured?"Start Switchboard":"Set Up Switchboard",async()=>{if(manager.Running)manager.Open();else await manager.Start();},!manager.Busy);
                 if(manager.Running)Button("Stop",async()=>{await manager.Stop();},!manager.Busy);
@@ -30,9 +30,9 @@ public sealed class MainWindow : Window {
                 Text("Updates",true);
                 Toggle("Check for app updates automatically",manager.Settings.AutomaticAppChecks,v=>manager.Settings.AutomaticAppChecks=v);
                 var panels=new Grid();if(ActualWidth<560){panels.RowDefinitions.Add(new());panels.RowDefinitions.Add(new());}else{panels.ColumnDefinitions.Add(new());panels.ColumnDefinitions.Add(new());}body.Children.Add(panels);
-                var app=new StackPanel{Margin=new Thickness(0,0,16,0)};app.Children.Add(new TextBlock{Text="Windows app",FontWeight=FontWeights.SemiBold});app.Children.Add(new TextBlock{Text="The tray app on this PC.",TextWrapping=TextWrapping.Wrap});
+                var app=new StackPanel{Margin=new Thickness(0,0,16,0)};app.Children.Add(new TextBlock{Text="Windows app",FontWeight=FontWeights.SemiBold});app.Children.Add(new TextBlock{Text="The tray app on this PC.",TextWrapping=TextWrapping.Wrap});app.Children.Add(new TextBlock{Text="Version: "+System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)});
                 var check=new System.Windows.Controls.Button{Content="Check for app updates…",Margin=new Thickness(0,10,0,0)};check.Click+=async(_,_)=>await AppUpdates.Check(this,manager);app.Children.Add(check);panels.Children.Add(app);
-                var server=new StackPanel();if(ActualWidth<560){Grid.SetRow(server,1);server.Margin=new Thickness(0,20,0,0);}else Grid.SetColumn(server,1);server.Children.Add(new TextBlock{Text="Server",FontWeight=FontWeights.SemiBold});server.Children.Add(new TextBlock{Text="Runs Switchboard in your browser.",TextWrapping=TextWrapping.Wrap});
+                var server=new StackPanel();if(ActualWidth<560){Grid.SetRow(server,1);server.Margin=new Thickness(0,20,0,0);}else Grid.SetColumn(server,1);server.Children.Add(new TextBlock{Text="Server",FontWeight=FontWeights.SemiBold});server.Children.Add(new TextBlock{Text="Runs Switchboard in your browser.",TextWrapping=TextWrapping.Wrap});server.Children.Add(new TextBlock{Text="Version: "+manager.RuntimeVersion});
                 var channel=new ComboBox{ItemsSource=new[]{"Stable (recommended)","Development"},SelectedIndex=manager.Settings.Channel=="development"?1:0,Margin=new Thickness(0,10,0,0),IsEnabled=manager.Settings.Pin==null};channel.SelectionChanged+=(_,_)=>{manager.Settings.Channel=channel.SelectedIndex==1?"development":"stable";manager.Settings.Save();};server.Children.Add(channel);
                 var install=new System.Windows.Controls.Button{Content=manager.Running?"Stop & Update…":"Check / Install update…",Margin=new Thickness(0,10,0,0),IsEnabled=!manager.Busy};install.Click+=async(_,_)=>{if(System.Windows.MessageBox.Show(this,"Install the selected server release? Your data is kept and the server will be left stopped.","Server update",MessageBoxButton.OKCancel)==MessageBoxResult.OK)await manager.Work(manager.InstallCore);};server.Children.Add(install);
             }else{

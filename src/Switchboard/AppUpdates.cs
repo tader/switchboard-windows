@@ -38,6 +38,19 @@ public static class AppUpdates {
             var bytes = await client.GetByteArrayAsync(prefix + Uri.EscapeDataString(file));
             if (bytes.LongLength != asset.GetProperty("Size").GetInt64() || !Convert.ToHexString(SHA256.HashData(bytes)).Equals(asset.GetProperty("SHA256").GetString(),StringComparison.OrdinalIgnoreCase)) throw new Exception("The app update package failed verification.");
             await File.WriteAllBytesAsync(Path.Combine(temporary,file),bytes);
+            // Verify the Windows trust signature on the main executable before
+            // handing the authenticated package to the installer.
+            using(var zip=System.IO.Compression.ZipFile.OpenRead(Path.Combine(temporary,file))) {
+                var executable=zip.Entries.Single(e=>e.FullName.EndsWith("/Switchboard.exe",StringComparison.OrdinalIgnoreCase));
+                var verifyFile=Path.Combine(temporary,"verify.exe");System.IO.Compression.ZipFileExtensions.ExtractToFile(executable,verifyFile);
+                var command=new System.Diagnostics.ProcessStartInfo("powershell.exe"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+                foreach(var arg in new[]{"-NoProfile","-NonInteractive","-Command","if ((Get-AuthenticodeSignature -LiteralPath $env:SWITCHBOARD_VERIFY_FILE).Status -ne 'Valid') { exit 1 }"})command.ArgumentList.Add(arg);
+                command.Environment["SWITCHBOARD_VERIFY_FILE"]=verifyFile;
+                using var verification=System.Diagnostics.Process.Start(command)!;
+                _=verification.StandardOutput.ReadToEndAsync();_=verification.StandardError.ReadToEndAsync();
+                await verification.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
+                if(verification.ExitCode!=0)throw new Exception("The Windows app signature is invalid.");
+            }
             await updater.DownloadUpdatesAsync(update);
             if (!await manager.Stop()) return;
             updater.ApplyUpdatesAndRestart(update);

@@ -70,6 +70,7 @@ public static class RuntimeInstaller {
                 try { await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(90)); } catch { probe.Kill(true); throw; }
                 if(probe.ExitCode!=0) throw new Exception("This runtime cannot open a copy of your database. Your data and backup are preserved.");
             } finally { Directory.Delete(rehearsal,true); }
+            progress("Finishing installation…");
             cancellation.ThrowIfCancellationRequested();
             File.WriteAllText(Path.Combine(stage,"runtime.json"),manifest.GetRawText()); File.WriteAllText(Path.Combine(stage,".prepared"),"");
             var final=Path.Combine(settings.StatePath,"releases",revision+"-"+Guid.NewGuid()); Directory.Move(stage,final);
