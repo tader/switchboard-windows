@@ -2,3 +2,5 @@
 **/obj/
 .dist/
 *.user
+.core-contract/
+.tools/

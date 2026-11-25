@@ -22,7 +22,9 @@ public sealed class Manager : IDisposable {
     private TaskCompletionSource<JsonElement>? account;
     private string? accountId;
     private readonly Job job = new();
-    public Manager() {
+    public Action<string> AccountBrowserOpener { get; set; } = OpenUrl;
+    public Manager(Settings? settings=null) {
+        if(settings!=null)Settings=settings;
         var journal=Path.Combine(Settings.StatePath,"runtime-install.json");
         if(File.Exists(journal)) {
             using var controller=RuntimeInstaller.Lease(Path.Combine(Settings.StatePath,"controller-lease.db"));
@@ -59,7 +61,7 @@ public sealed class Manager : IDisposable {
             if (line.Length > 1024 * 1024) throw new Exception("Invalid manager response.");
             var m = JsonDocument.Parse(line).RootElement;
             switch (m.GetProperty("event").GetString()) {
-                case "started": Status = "Running on this PC"; if (m.TryGetProperty("setupUrl", out var setup) && setup.ValueKind == JsonValueKind.String) OpenUrl(setup.GetString()!); break;
+                case "started": Status = "Running on this PC"; if (m.TryGetProperty("setupUrl", out var setup) && setup.ValueKind == JsonValueKind.String) AccountBrowserOpener(setup.GetString()!); break;
                 case "status": AccountReady = m.TryGetProperty("ready", out var ready) && ready.GetBoolean(); Attention = m.TryGetProperty("attention", out var attention) ? attention.GetInt32() : 0; break;
                 case "stopped": Status = "Not running"; stopped?.TrySetResult(true); break;
                 case "account-result": if (m.GetProperty("requestId").GetString() == accountId) account?.TrySetResult(m.Clone()); break;

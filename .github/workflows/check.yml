@@ -27,7 +27,21 @@ jobs:
         env: {EXPECTED_SHA: '${{ inputs.expected_sha }}'}
         run: if ((git rev-parse HEAD) -ne $env:EXPECTED_SHA) { throw 'Revision mismatch' }
       - run: dotnet publish src/Switchboard/Switchboard.csproj -c Release -r ${{ matrix.rid }} --self-contained true -o .dist/${{ matrix.rid }}
-      - run: dotnet run --project tests/Smoke/Smoke.csproj -c Release -- .dist/screenshots
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: tader/switchboard
+          ref: 70dfe892540557c2105f25280a19145ae0852093
+          path: .core-contract
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with: {node-version: '24'}
+      - run: npm ci --prefix .core-contract
+      - run: npm ci --prefix .core-contract/web
+      - run: npm run build --prefix .core-contract/web
+      - shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .core-contract/bin | Out-Null
+          Copy-Item (Get-Command node).Source .core-contract/bin/node.exe
+      - run: dotnet run --project tests/Smoke/Smoke.csproj -c Release -- .dist/screenshots .core-contract
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: {name: 'Switchboard-${{ matrix.rid }}-unsigned-development', path: '.dist/'}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

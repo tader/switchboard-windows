@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.IO;
 class Program {
     static void Require(bool value,string message){if(!value)throw new Exception(message);}
+    static void Wait(Task task) {var frame=new System.Windows.Threading.DispatcherFrame();var timer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(50)};timer.Tick+=(_,_)=>{if(task.IsCompleted)frame.Continue=false;};timer.Start();System.Windows.Threading.Dispatcher.PushFrame(frame);timer.Stop();task.GetAwaiter().GetResult();}
     [STAThread] static int Main(string[] args) {
         using var deadline=new System.Threading.Timer(_=>Environment.FailFast("Smoke test deadline exceeded"),null,TimeSpan.FromMinutes(3),Timeout.InfiniteTimeSpan);
         Console.WriteLine("Starting ownership smoke checks");
@@ -40,6 +41,17 @@ class Program {
                 var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using var output=File.Create(Path.Combine(directory,"settings-"+theme+"-"+width+".png"));encoder.Save(output);
             }
             window.Hide();Require(!window.IsVisible,"Closing settings failed");
+            if(args.Length>1) {
+                Console.WriteLine("Starting native manager/core lifecycle checks");
+                var socket=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);socket.Start();var port=((System.Net.IPEndPoint)socket.LocalEndpoint).Port;socket.Stop();
+                var owned=new Settings{DataPath=Path.Combine(root,"OwnedData"),StatePath=Path.Combine(root,"OwnedState"),RuntimePath=Path.GetFullPath(args[1]),Configured=true,Port=port,BrowserUrl=$"http://127.0.0.1:{port}"};
+                using var local=new Manager(owned);string? setup=null;local.AccountBrowserOpener=value=>setup=value;
+                Wait(local.Start());
+                Wait(Task.Run(async()=>{var until=DateTime.UtcNow.AddSeconds(90);while(!local.Status.StartsWith("Running")){if(local.Error!=null)throw new Exception(local.Error);if(DateTime.UtcNow>until)throw new Exception("Native startup timed out");await Task.Delay(100);}}));
+                Require(setup?.Contains("/invite#")==true,"Initial setup link not received over private pipes");
+                Wait(local.Stop());Require(!local.Running,"Owned server remained running");
+                Wait(local.Start());Wait(Task.Delay(1500));Wait(local.Stop());
+            }
             Console.WriteLine("PASS: settings validation, exclusive lock recovery, verified relocation, WPF layout and screenshot render.");
             return 0;
         }finally{Directory.Delete(root,true);}
