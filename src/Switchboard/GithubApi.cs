@@ -14,14 +14,14 @@ public static class GithubApi {
         return request;
     }
     public static string Error(HttpResponseMessage response, bool secondaryRateLimited=false) {
-        if(response.StatusCode==HttpStatusCode.Unauthorized)return "GitHub rejected the token. Replace or remove it in Settings → Updates.";
+        if(response.StatusCode==HttpStatusCode.Unauthorized)return "GitHub rejected the token. Remove it under GitHub token in Settings, then save a new token.";
         var limited=secondaryRateLimited || response.StatusCode==(HttpStatusCode)429 || response.StatusCode==HttpStatusCode.Forbidden && (response.Headers.TryGetValues("x-ratelimit-remaining",out var remaining) && remaining.Contains("0") || response.Headers.RetryAfter!=null);
         if(limited) {
             var timing=response.Headers.RetryAfter?.Delta is TimeSpan delay ? $" Retry after {Math.Ceiling(delay.TotalSeconds)} seconds." : response.Headers.RetryAfter?.Date is DateTimeOffset date ? $" Retry after {date.ToLocalTime():g}." : "";
             if(timing.Length==0 && response.Headers.TryGetValues("x-ratelimit-reset",out var reset) && long.TryParse(reset.FirstOrDefault(),out var seconds) && seconds>=0 && seconds<=253402300799)timing=$" Retry after {DateTimeOffset.FromUnixTimeSeconds(seconds).ToLocalTime():g}.";
-            return "GitHub rate limit reached. Add or replace your GitHub token in Settings → Updates."+timing;
+            return "GitHub rate limit reached. Open Settings and scroll below Updates to GitHub token."+timing;
         }
-        if(response.StatusCode==HttpStatusCode.Forbidden)return "GitHub denied access. Check the token permissions or remove the token in Settings → Updates.";
+        if(response.StatusCode==HttpStatusCode.Forbidden)return "GitHub denied access. Check the token permissions or remove it under GitHub token in Settings.";
         if(response.StatusCode==HttpStatusCode.NotFound)return "The requested GitHub release or revision was not found.";
         return "Could not load GitHub release metadata. Check your connection and retry.";
     }

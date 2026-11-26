@@ -7,6 +7,26 @@ using System.IO;
 class Program {
     static void Require(bool value,string message){if(!value)throw new Exception(message);}
     static void Wait(Task task) {var frame=new System.Windows.Threading.DispatcherFrame();var timer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(50)};timer.Tick+=(_,_)=>{if(task.IsCompleted)frame.Continue=false;};timer.Start();System.Windows.Threading.Dispatcher.PushFrame(frame);timer.Stop();task.GetAwaiter().GetResult();}
+    static IEnumerable<DependencyObject> Descendants(DependencyObject parent) {
+        for(var i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++){
+            var child=VisualTreeHelper.GetChild(parent,i);
+            yield return child;
+            foreach(var nested in Descendants(child))yield return nested;
+        }
+    }
+    static bool HasText(Window window,string text) => Descendants(window).OfType<TextBlock>().Any(t=>t.Text==text);
+    static bool HasButton(Window window,string label) => Descendants(window).OfType<Button>().Any(b=>Equals(b.Content,label));
+    static void Capture(Window window,string directory,string name,int width) {
+        window.Width=width;
+        window.Height=1000;
+        window.UpdateLayout();
+        var bitmap=new RenderTargetBitmap((int)window.ActualWidth,(int)window.ActualHeight,96,96,PixelFormats.Pbgra32);
+        bitmap.Render(window);
+        var encoder=new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var output=File.Create(Path.Combine(directory,name));
+        encoder.Save(output);
+    }
     [STAThread] static int Main(string[] args) {
         using var deadline=new System.Threading.Timer(_=>Environment.FailFast("Smoke test deadline exceeded"),null,TimeSpan.FromMinutes(3),Timeout.InfiniteTimeSpan);
         Console.WriteLine("Starting ownership smoke checks");
@@ -51,10 +71,11 @@ class Program {
                 try{using var invalid=GithubApi.Request(new Uri(url),syntheticToken);throw new Exception("Untrusted origin accepted");}catch(Exception e){Require(e.Message=="Untrusted GitHub API origin.","Wrong origin error");}
             }
             using(var unauthorized=new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized))
-                Require(GithubApi.Error(unauthorized).Contains("Replace or remove"),"Missing token recovery advice");
+                Require(GithubApi.Error(unauthorized).Contains("Remove it under GitHub token"),"Missing token recovery advice");
             using(var limited=new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.Forbidden)) {
                 limited.Headers.Add("x-ratelimit-remaining","0");limited.Headers.Add("retry-after","60");
                 Require(GithubApi.Error(limited).Contains("60 seconds"),"Rate-limit retry timing missing");
+                Require(GithubApi.Error(limited).Contains("below Updates to GitHub token"),"Rate-limit settings guidance missing");
             }
             using(var missing=new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.NotFound))
                 Require(GithubApi.Error(missing).Contains("not found"),"Missing release error wrong");
@@ -64,23 +85,42 @@ class Program {
             Require(!System.Text.Json.JsonSerializer.Serialize(settings).Contains(syntheticToken),"Token leaked into settings");
             Console.WriteLine("Starting WPF render smoke checks");
             var app=new System.Windows.Application();app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.xaml")});
-            using var manager=new Manager();var window=new MainWindow(manager);window.Show();window.UpdateLayout();
-            IEnumerable<System.Windows.DependencyObject> Descendants(System.Windows.DependencyObject parent){for(var i=0;i<VisualTreeHelper.GetChildrenCount(parent);i++){var child=VisualTreeHelper.GetChild(parent,i);yield return child;foreach(var nested in Descendants(child))yield return nested;}}
-            Require(Descendants(window).OfType<PasswordBox>().Any(),"Masked token entry missing");
-            var entry=Descendants(window).OfType<PasswordBox>().Single();entry.Password="synthetic-unsaved-draft";
-            System.Windows.Input.Keyboard.ClearFocus();window.Refresh();window.UpdateLayout();
-            Require(Descendants(window).OfType<PasswordBox>().Single().Password=="synthetic-unsaved-draft","Token draft lost during refresh");
-            Descendants(window).OfType<PasswordBox>().Single().Clear();
-            Require(Descendants(window).OfType<TextBlock>().Any(t=>t.Text=="Server"),"Server update panel is missing");
-            Require(Descendants(window).OfType<TextBlock>().Any(t=>t.Text=="Windows app"),"App update panel is missing");
             var directory=args.Length>0?args[0]:root;Directory.CreateDirectory(directory);
-            foreach(var theme in new[]{ThemeMode.Light,ThemeMode.Dark}) foreach(var width in new[]{600,460}) {
-                app.ThemeMode=theme;
-                window.Width=width;window.Height=800;window.UpdateLayout();
-                var bitmap=new RenderTargetBitmap((int)window.ActualWidth,(int)window.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(window);
-                var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using var output=File.Create(Path.Combine(directory,"settings-"+theme+"-"+width+".png"));encoder.Save(output);
-            }
-            window.Hide();Require(!window.IsVisible,"Closing settings failed");
+            settings.RuntimePath=Path.Combine(root,"VersionFixture");
+            Directory.CreateDirectory(settings.RuntimePath);
+            File.WriteAllText(Path.Combine(settings.RuntimePath,"runtime.json"),"""{"version":"2.3.0"}""");
+            using var manager=new Manager(settings);
+            var window=new MainWindow(manager,store,true);
+            try {
+                window.Show();
+                window.UpdateLayout();
+                Require(Descendants(window).OfType<PasswordBox>().Any(),"Masked token entry missing");
+                var entry=Descendants(window).OfType<PasswordBox>().Single();
+                entry.Password="synthetic-unsaved-draft";
+                System.Windows.Input.Keyboard.ClearFocus();window.Refresh();window.UpdateLayout();
+                Require(Descendants(window).OfType<PasswordBox>().Single().Password=="synthetic-unsaved-draft","Token draft lost during refresh");
+                Descendants(window).OfType<PasswordBox>().Single().Clear();
+                Require(HasText(window,"Server"),"Server update panel is missing");
+                Require(HasText(window,"Windows app"),"App update panel is missing");
+
+                window.ShowAppUpdateResult("2.4.0");
+                window.ShowServerUpdateResult(settings.Channel,settings.Pin,manager.RuntimeVersion,"2.5.0");
+                Require(HasText(window,"Available 2.4.0") && HasText(window,"Selected release 2.5.0"),"Candidate versions missing");
+                foreach(var theme in new[]{ThemeMode.Light,ThemeMode.Dark}) foreach(var width in new[]{600,460}) {
+                    app.ThemeMode=theme;
+                    Capture(window,directory,$"settings-updates-{theme}-{width}.png",width);
+                }
+
+                store.Save(syntheticToken);
+                window.ShowAppUpdateResult(null);
+                window.ShowServerUpdateResult(settings.Channel,settings.Pin,manager.RuntimeVersion,manager.RuntimeVersion);
+                window.UpdateLayout();
+                Require(Descendants(window).OfType<TextBlock>().Count(t=>t.Text=="Up to date")==2,"Confirmed update statuses missing");
+                Require(HasButton(window,"Remove Token") && !HasButton(window,"Save Token") && !HasButton(window,"Create a GitHub Token…")
+                    && !Descendants(window).OfType<PasswordBox>().Any(),"Stored token controls are incorrect");
+                Capture(window,directory,"settings-token-stored.png",600);
+            } finally { window.Hide(); store.Remove(); }
+            Require(!window.IsVisible,"Closing settings failed");
             if(args.Length>1) {
                 Console.WriteLine("Starting native manager/core lifecycle checks");
                 var socket=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);socket.Start();var port=((System.Net.IPEndPoint)socket.LocalEndpoint).Port;socket.Stop();
@@ -89,6 +129,41 @@ class Program {
                 Wait(local.Start());
                 Wait(Task.Run(async()=>{var until=DateTime.UtcNow.AddSeconds(90);while(!local.Status.StartsWith("Running")){if(local.Error!=null)throw new Exception(local.Error);if(DateTime.UtcNow>until)throw new Exception("Native startup timed out");await Task.Delay(100);}}));
                 Require(setup?.Contains("/invite#")==true,"Initial setup link not received over private pipes");
+                Require(local.NeedsAccountSetup,"The initial setup state was not detected");
+                var setupWindow=new MainWindow(local,store,true);
+                setupWindow.Show();
+                try {
+                    Capture(setupWindow,directory,"settings-running-first-admin.png",600);
+                    Require(HasText(setupWindow,"Running on this PC") && HasButton(setupWindow,"Continue Account Setup…"),"Running setup controls missing");
+                    Require(!HasButton(setupWindow,"Recover Password…"),"Recovery appeared before account setup");
+                } finally { setupWindow.Hide(); }
+                using(var http=new System.Net.Http.HttpClient())
+                using(var request=new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post,owned.BrowserUrl+"/api/auth/invite")) {
+                    request.Headers.Add("Origin",owned.BrowserUrl);
+                    request.Content=System.Net.Http.Json.JsonContent.Create(new {
+                        token=new Uri(setup!).Fragment[1..],
+                        username="synthetic-owner",
+                        password="synthetic-original-password"
+                    });
+                    var response=http.SendAsync(request);
+                    Wait(response);
+                    using var accepted=response.Result;
+                    Require(accepted.IsSuccessStatusCode,"Synthetic administrator creation failed");
+                }
+                Wait(Task.Run(async()=>{
+                    var until=DateTime.UtcNow.AddSeconds(15);
+                    while(!local.AccountReady){
+                        if(DateTime.UtcNow>until)throw new Exception("Account status did not refresh");
+                        await Task.Delay(100);
+                    }
+                }));
+                var readyWindow=new MainWindow(local,store,true);
+                readyWindow.Show();
+                try {
+                    Capture(readyWindow,directory,"settings-account-recovery.png",600);
+                    Require(!HasButton(readyWindow,"Continue Account Setup…") && HasButton(readyWindow,"Recover Password…"),
+                        "Ready account controls are incorrect");
+                } finally { readyWindow.Hide(); }
                 Wait(local.Stop());Require(!local.Running,"Owned server remained running");
                 Wait(local.Start());Wait(Task.Delay(1500));Wait(local.Stop());
                 Wait(local.Start());Wait(Task.Delay(1500));

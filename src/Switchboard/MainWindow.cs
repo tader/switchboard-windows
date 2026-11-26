@@ -1,58 +1,67 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Shapes;
 using System.Windows.Media;
 using Microsoft.Win32;
 namespace Switchboard;
 public sealed class MainWindow : Window {
     readonly Manager manager; readonly StackPanel body=new(){Margin=new Thickness(24)};
     bool advanced;
+    readonly GithubTokenStore tokenStore;
+    readonly bool appUpdatesAvailable;
+    string? appUpdateResult;
+    (string Channel, string? Pin, string Installed, string Selected)? serverRelease;
+    bool checkingServerRelease;
     string tokenDraft="";
     bool tokenSaving;
     int releasePage=1;
     readonly List<string> versionTags=new();
-    public MainWindow(Manager model) {manager=model;Title="Switchboard";Width=600;Height=760;MinWidth=460;MinHeight=500;Content=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};Microsoft.Win32.SystemEvents.UserPreferenceChanged+=(_,_)=>Dispatcher.Invoke(Refresh);SizeChanged+=(_,_)=>Refresh();Closing+=(_,e)=>{e.Cancel=true;Hide();};Refresh();}
+    public MainWindow(Manager model) : this(model, new GithubTokenStore(), AppUpdates.CanCheck) {}
+    internal MainWindow(Manager model, GithubTokenStore tokenStore, bool appUpdatesAvailable) {
+        manager=model; this.tokenStore=tokenStore; this.appUpdatesAvailable=appUpdatesAvailable;Title="Switchboard";Width=600;Height=760;MinWidth=460;MinHeight=500;Content=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};Microsoft.Win32.SystemEvents.UserPreferenceChanged+=(_,_)=>Dispatcher.Invoke(Refresh);Closing+=(_,e)=>{e.Cancel=true;Hide();};Refresh();}
     void Text(string value,bool heading=false) {body.Children.Add(new TextBlock{Foreground=Foreground,Text=value,TextWrapping=TextWrapping.Wrap,FontSize=heading?20:14,FontWeight=heading?FontWeights.SemiBold:FontWeights.Normal,Margin=new Thickness(0,heading?20:6,0,6)});}
     void Button(string label,Func<Task> action,bool enabled=true) {var b=new System.Windows.Controls.Button{Content=label,IsEnabled=enabled,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,5,0,5),Padding=new Thickness(12,6,12,6)};b.Click+=async(_,_)=>{try{await action();}catch(Exception e){System.Windows.MessageBox.Show(this,e.Message,"Switchboard");}Refresh();};body.Children.Add(b);}
     void Toggle(string label,bool value,Action<bool> change) {var c=new CheckBox{Content=label,IsChecked=value,Margin=new Thickness(0,8,0,8)};c.Click+=(_,_)=>{change(c.IsChecked==true);manager.Settings.Save();};body.Children.Add(c);}
     public void Refresh() {
         Dispatcher.Invoke(()=>{
-            if (System.Windows.Input.Keyboard.FocusedElement is TextBox or PasswordBox) return;
+            if (System.Windows.Input.Keyboard.FocusedElement is FrameworkElement focused && IsAncestorOf(focused) && focused is TextBox or PasswordBox) return;
             var theme=System.Windows.Application.Current.ThemeMode;
             var dark=theme==System.Windows.ThemeMode.Dark || theme==System.Windows.ThemeMode.System && (int?)Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize","AppsUseLightTheme",1)==0;
             Background=SystemParameters.HighContrast?SystemColors.WindowBrush:new SolidColorBrush(dark?Color.FromRgb(32,32,32):Color.FromRgb(250,250,250));
             Foreground=SystemParameters.HighContrast?SystemColors.WindowTextBrush:new SolidColorBrush(dark?Color.FromRgb(245,245,245):Color.FromRgb(26,26,26));
             ((ScrollViewer)Content).Background=Background;
-            body.Children.Clear();Text(advanced?"Advanced Settings":"Switchboard",true);Text(manager.Status);
+            body.Children.Clear();
+            Text(advanced?"Advanced Settings":"Switchboard",true);
+            ShowServerStatus(dark);
             if(manager.Error!=null) Text(manager.Error);
             if(manager.Installation!=null && manager.CanCancelInstallation) Button("Cancel Installation",()=>{manager.Installation.Cancel();return Task.CompletedTask;});
             if(!advanced){
                 Button(manager.Running?"Open Switchboard":manager.Settings.Configured?"Start Switchboard":"Set Up Switchboard",async()=>{if(manager.Running)manager.Open();else await manager.Start();},!manager.Busy);
                 if(manager.Running)Button("Stop",async()=>{await manager.Stop();},!manager.Busy);
                 if(!manager.Settings.Configured)Text("Set up Switchboard to download the server and create your account in your browser. The recommended settings are ready.");
-                Text("Account",true);
-                if(manager.Running){
-                    Text(manager.AccountReady?"Your account is ready.":"Finish creating your account in your browser.");
-                    if(!manager.AccountReady)Button("Continue Account Setup",async()=>{var r=await manager.Account("account-setup");if(r.TryGetProperty("setupUrl",out var u)&&u.ValueKind==System.Text.Json.JsonValueKind.String)Manager.OpenUrl(u.GetString()!);});
-                    Button("Recover Password…",Recover,!manager.Busy);
-                }else{
-                    Text("Start Switchboard to access your account.");
-                    if(manager.Settings.Configured)Button("Start & Continue to Recovery…",async()=>{await manager.Start();if(manager.Running)await Recover();},!manager.Busy);
+                if (manager.ServerStarted && manager.NeedsAccountSetup) {
+                    Text("Create your administrator account",true);
+                    Button("Continue Account Setup…",async()=>{
+                        var result=await manager.Account("account-setup");
+                        if(result.TryGetProperty("setupUrl",out var url) && url.ValueKind==System.Text.Json.JsonValueKind.String)
+                            Manager.OpenUrl(url.GetString()!);
+                    },!manager.Busy);
                 }
                 if(manager.Attention>0)Button($"Sign in to connections ({manager.Attention})",()=>{Manager.OpenUrl(manager.Settings.BrowserUrl.TrimEnd('/')+"/connections");return Task.CompletedTask;});
                 Text("Startup",true);Toggle("Start Switchboard when the app opens",manager.Settings.StartServer,v=>manager.Settings.StartServer=v);
                 using var key=Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
                 Toggle("Open app when I sign in to Windows",key?.GetValue("Switchboard")!=null,v=>{using var run=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");if(v)run.SetValue("Switchboard","\""+Environment.ProcessPath+"\"");else run.DeleteValue("Switchboard",false);});
                 Button("Open Windows Startup Apps",()=>{Manager.OpenUrl("ms-settings:startupapps");return Task.CompletedTask;});
-                Text("Updates",true);
+                UpdateSettings();
                 TokenSettings();
-                var panels=new Grid();if(ActualWidth<560){panels.RowDefinitions.Add(new());panels.RowDefinitions.Add(new());}else{panels.ColumnDefinitions.Add(new());panels.ColumnDefinitions.Add(new());}body.Children.Add(panels);
-                var app=new StackPanel{Margin=new Thickness(0,0,16,0)};app.Children.Add(new TextBlock{Text="Windows app",FontWeight=FontWeights.SemiBold});app.Children.Add(new TextBlock{Text="The tray app on this PC.",TextWrapping=TextWrapping.Wrap});app.Children.Add(new TextBlock{Text="Version: "+System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)});
-                var automatic=new CheckBox{Content="Check automatically",IsChecked=manager.Settings.AutomaticAppChecks,Margin=new Thickness(0,10,0,0)};System.Windows.Automation.AutomationProperties.SetName(automatic,"Check for app updates automatically");automatic.Click+=(_,_)=>{manager.Settings.AutomaticAppChecks=automatic.IsChecked==true;manager.Settings.Save();};app.Children.Add(automatic);
-                var check=new System.Windows.Controls.Button{Content="Check for app updates…",Margin=new Thickness(0,10,0,0)};check.Click+=async(_,_)=>await AppUpdates.Check(this,manager);app.Children.Add(check);panels.Children.Add(app);
-                var server=new StackPanel();if(ActualWidth<560){Grid.SetRow(server,1);server.Margin=new Thickness(0,20,0,0);}else Grid.SetColumn(server,1);server.Children.Add(new TextBlock{Text="Server",FontWeight=FontWeights.SemiBold});server.Children.Add(new TextBlock{Text="Runs Switchboard in your browser.",TextWrapping=TextWrapping.Wrap});server.Children.Add(new TextBlock{Text="Version: "+manager.RuntimeVersion});
-                var channel=new ComboBox{ItemsSource=new[]{"Stable (recommended)","Development"},SelectedIndex=manager.Settings.Channel=="development"?1:0,Margin=new Thickness(0,10,0,0),IsEnabled=manager.Settings.Pin==null};channel.SelectionChanged+=(_,_)=>{manager.Settings.Channel=channel.SelectedIndex==1?"development":"stable";manager.Settings.Save();};server.Children.Add(channel);
-                var install=new System.Windows.Controls.Button{Content=manager.Running?"Stop & Update…":"Check / Install update…",Margin=new Thickness(0,10,0,0),IsEnabled=!manager.Busy};install.Click+=async(_,_)=>{if(System.Windows.MessageBox.Show(this,"Install the selected server release? Your data is kept and the server will be left stopped.","Server update",MessageBoxButton.OKCancel)==MessageBoxResult.OK)await manager.Work(manager.InstallCore);};server.Children.Add(install);panels.Children.Add(server);
+                if (manager.ServerStarted && manager.AccountReady)
+                    Button("Recover Password…",Recover,!manager.Busy);
+                else if (!manager.Running && manager.Settings.Configured)
+                    Button("Start & Continue to Recovery…",async()=>{
+                        await manager.Start();
+                        if(manager.Running)await Recover();
+                    },!manager.Busy);
             }else{
                 Text("Folders and network",true);Text("Stop Switchboard before changing these settings.");
                 var draft=System.Text.Json.JsonSerializer.Deserialize<Settings>(System.Text.Json.JsonSerializer.Serialize(manager.Settings))!;
@@ -69,20 +78,113 @@ public sealed class MainWindow : Window {
             Button(advanced?"Back to Settings":"Advanced…",()=>{advanced=!advanced;Refresh();return Task.CompletedTask;});Text("Closing this window keeps Switchboard running.");
         });
     }
+    void ShowServerStatus(bool dark) {
+        var row = new DockPanel { Margin = new Thickness(0,6,0,6) };
+        var dot = new Ellipse {
+            Width=9, Height=9, Margin=new Thickness(0,0,8,0),
+            VerticalAlignment=VerticalAlignment.Center,
+            Fill=SystemParameters.HighContrast ? SystemColors.WindowTextBrush :
+                manager.ServerStarted ? new SolidColorBrush(dark ? Color.FromRgb(100,210,125) : Color.FromRgb(16,125,59)) :
+                new SolidColorBrush(dark ? Color.FromRgb(160,160,160) : Color.FromRgb(105,105,105))
+        };
+        DockPanel.SetDock(dot,Dock.Left);
+        row.Children.Add(dot);
+        row.Children.Add(new TextBlock { Text=manager.Status, Foreground=Foreground, TextWrapping=TextWrapping.Wrap, FontSize=14 });
+        body.Children.Add(row);
+    }
+
+    internal void ShowAppUpdateResult(string? candidate) {
+        appUpdateResult = candidate == null ? "Up to date" : $"Available {candidate}";
+        Refresh();
+    }
+
+    internal void ShowServerUpdateResult(string channel, string? pin, string installed, string selected) {
+        serverRelease = (channel,pin,installed,selected);
+        Refresh();
+    }
+
+    void UpdateSettings() {
+        Text("Updates",true);
+        Text("Windows app");
+        var appVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(3);
+        VersionComparison(appVersion, appUpdateResult ?? (appUpdatesAvailable ? null : "Updates unavailable in this build"));
+        if (appUpdatesAvailable) {
+            Toggle("Check for app updates automatically",manager.Settings.AutomaticAppChecks,v=>manager.Settings.AutomaticAppChecks=v);
+            Button("Check for App Updates…",()=>AppUpdates.Check(this,manager),!manager.Busy);
+        }
+
+        Text("Server");
+        var installed = manager.RuntimeVersion;
+        var selected = serverRelease is { } release && (release.Channel,release.Pin,release.Installed)==(manager.Settings.Channel,manager.Settings.Pin,installed)
+            ? release.Selected : null;
+        VersionComparison(installed, selected == null ? null : selected == installed ? "Up to date" : $"Selected release {selected}");
+
+        var channel=new ComboBox {
+            ItemsSource=new[]{"Stable (recommended)","Development"},
+            SelectedIndex=manager.Settings.Channel=="development"?1:0,
+            Margin=new Thickness(0,8,0,0), HorizontalAlignment=HorizontalAlignment.Left,
+            IsEnabled=manager.Settings.Pin==null && !manager.Busy && !checkingServerRelease
+        };
+        System.Windows.Automation.AutomationProperties.SetName(channel,"Server update channel");
+        channel.SelectionChanged+=(_,_)=>{
+            manager.Settings.Channel=channel.SelectedIndex==1?"development":"stable";
+            manager.Settings.Save();
+            serverRelease=null;
+            Refresh();
+        };
+        body.Children.Add(channel);
+        Button(checkingServerRelease ? "Checking for Server Updates…" : "Check for Server Updates",async()=>{
+            if (checkingServerRelease || manager.Busy) return;
+            var selection = (manager.Settings.Channel,manager.Settings.Pin,installed);
+            serverRelease=null;
+            checkingServerRelease=true;
+            Refresh();
+            try {
+                var tag=await RuntimeInstaller.SelectedTag(selection.Channel,selection.Pin);
+                ShowServerUpdateResult(selection.Channel,selection.Pin,selection.installed,tag.TrimStart('v'));
+            } finally { checkingServerRelease=false; }
+        },!manager.Busy && !checkingServerRelease);
+        if (selected != null && selected != installed)
+            Button(manager.Running?"Stop & Install Server Release…":"Install Server Release…",async()=>{
+                if(System.Windows.MessageBox.Show(this,"Install the selected server release? Your data is kept and the server will be left stopped.","Server update",MessageBoxButton.OKCancel)==MessageBoxResult.OK)
+                    await manager.Work(manager.InstallCore);
+            },!manager.Busy);
+    }
+
+    void VersionComparison(string? installed, string? result) {
+        var row=new WrapPanel { Margin=new Thickness(0,0,0,4) };
+        row.Children.Add(new TextBlock { Text=installed=="Not installed" ? installed : $"Installed {installed}", Margin=new Thickness(0,0,14,0) });
+        if (result != null) row.Children.Add(new TextBlock { Text=result });
+        body.Children.Add(row);
+    }
+
     void TokenSettings() {
-        Text("GitHub token");
-        Text("Optional. Raises limits for desktop release checks and plugin installation. Stored in Windows Credential Manager.");
-        try { Text(new GithubTokenStore().Read()==null ? "No token configured." : "Token configured."); }
-        catch(Exception e) { Text(e.Message); }
+        Text("GitHub token for higher rate limits (optional)",true);
+        bool stored;
+        try { stored=tokenStore.Read()!=null; }
+        catch(Exception e) { Text(e.Message); return; }
+        if (stored) {
+            Button("Remove Token",async()=>{
+                if(tokenSaving)return;
+                tokenSaving=true;
+                try { await Task.Run(tokenStore.Remove); }
+                finally { tokenSaving=false; }
+            },!manager.Busy&&!tokenSaving);
+            return;
+        }
         var box=new PasswordBox { Password=tokenDraft, IsEnabled=!manager.Busy&&!tokenSaving, Margin=new Thickness(0,6,0,6) };
         System.Windows.Automation.AutomationProperties.SetName(box,"GitHub token");
         box.PasswordChanged+=(_,_)=>tokenDraft=box.Password;
         body.Children.Add(box);
-        Button("Save Token",async()=>{if(tokenSaving)return;var value=tokenDraft;tokenSaving=true;box.IsEnabled=false;try{await Task.Run(()=>new GithubTokenStore().Save(value));tokenDraft="";box.Clear();}finally{tokenSaving=false;box.IsEnabled=!manager.Busy;}},!manager.Busy&&!tokenSaving);
-        Button("Remove Token",async()=>{if(tokenSaving)return;tokenSaving=true;try{await Task.Run(()=>new GithubTokenStore().Remove());tokenDraft="";box.Clear();}finally{tokenSaving=false;box.IsEnabled=!manager.Busy;}},!manager.Busy&&!tokenSaving);
-        Button("Create a GitHub token…",()=>{Manager.OpenUrl("https://github.com/settings/personal-access-tokens/new");return Task.CompletedTask;});
-        Text("Choose public repositories only; no additional permissions are needed. Server use is limited to installation, including catalogs and dependencies. Plugin and server update checks use their existing credentials.");
-        if(manager.Running)Text("Token changes apply to desktop requests immediately. Stop and start Switchboard to apply them to plugin installation. Server support requires an updated runtime.");
+        Button("Save Token",async()=>{
+            if(tokenSaving)return;
+            var value=tokenDraft;
+            tokenSaving=true;
+            box.IsEnabled=false;
+            try { await Task.Run(()=>tokenStore.Save(value)); tokenDraft=""; }
+            finally { tokenSaving=false; }
+        },!manager.Busy&&!tokenSaving);
+        Button("Create a GitHub Token…",()=>{Manager.OpenUrl("https://github.com/settings/personal-access-tokens/new");return Task.CompletedTask;});
     }
     async Task LoadVersions(ComboBox box){try{
         box.IsEnabled=false;

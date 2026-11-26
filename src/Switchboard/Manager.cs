@@ -15,6 +15,8 @@ public sealed class Manager : IDisposable {
     public string RuntimeVersion {get {try {var pointer=Path.Combine(Settings.StatePath,"current.json");var runtime=File.Exists(pointer)?JsonDocument.Parse(File.ReadAllText(pointer)).RootElement.GetProperty("release").GetString():Settings.RuntimePath;return JsonDocument.Parse(File.ReadAllText(Path.Combine(runtime!,"runtime.json"))).RootElement.GetProperty("version").GetString()!;}catch{return "Not installed";}}}
     public int Attention { get; private set; }
     public bool AccountReady { get; private set; }
+    internal bool NeedsAccountSetup { get; private set; }
+    internal bool ServerStarted => Status == "Running on this PC";
     public event Action? Changed;
     public void ApplySettings(Settings value) { value.Save(); Settings = value; Notify(); }
     public CancellationTokenSource? Installation { get; private set; }
@@ -55,28 +57,47 @@ public sealed class Manager : IDisposable {
             start.Environment.Remove("SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN");
             start.Environment.Remove("NODE_OPTIONS"); start.Environment.Remove("NODE_PATH");
             Session = Guid.NewGuid();
+            AccountReady = false;
+            NeedsAccountSetup = false;
+            Status = "Starting…";
             child = Process.Start(start) ?? throw new Exception("Could not start Switchboard.");
             job.Attach(child);
             // Never forward raw stderr, IPC payloads or setup links into logs.
             _ = child.StandardError.ReadToEndAsync();
             reader = Read(child);
             await Send(new { action = "start", settings = new { instance = "local-manager", mode = "runtime", dataDir = Settings.DataPath, stateDir = Settings.StatePath, initialRelease = Settings.RuntimePath, appUrl = Settings.ControlUrl, env = serverEnvironment } });
-            Status = "Starting…"; poll.Start();
+            poll.Start();
         });
     }
     private async Task Read(Process process) {
         try { while (await process.StandardOutput.ReadLineAsync() is { } line) {
             if (line.Length > 1024 * 1024) throw new Exception("Invalid manager response.");
-            var before=(Status,AccountReady,Attention,Error,UpdateState);
+            var before=(Status,AccountReady,NeedsAccountSetup,Attention,Error,UpdateState);
             var m = JsonDocument.Parse(line).RootElement;
             switch (m.GetProperty("event").GetString()) {
-                case "started": Status = "Running on this PC"; if (m.TryGetProperty("setupUrl", out var setup) && setup.ValueKind == JsonValueKind.String) AccountBrowserOpener(setup.GetString()!); break;
-                case "status": UpdateState=m.TryGetProperty("job",out var jobState)&&jobState.ValueKind==JsonValueKind.Object&&jobState.TryGetProperty("state",out var jobPhase)?jobPhase.GetString()??"":"";AccountReady = m.TryGetProperty("ready", out var ready) && ready.GetBoolean(); Attention = m.TryGetProperty("attention", out var attention) ? attention.GetInt32() : 0; break;
+                case "started":
+                    Status = "Running on this PC";
+                    NeedsAccountSetup = m.TryGetProperty("setupUrl", out var setup) && setup.ValueKind == JsonValueKind.String;
+                    if (NeedsAccountSetup) AccountBrowserOpener(setup.GetString()!);
+                    await Send(new { action = "status" });
+                    break;
+                case "status":
+                    UpdateState=m.TryGetProperty("job",out var jobState)&&jobState.ValueKind==JsonValueKind.Object&&jobState.TryGetProperty("state",out var jobPhase)?jobPhase.GetString()??"":"";
+                    if (m.TryGetProperty("ready", out var ready)) {
+                        AccountReady = ready.GetBoolean();
+                        NeedsAccountSetup = !AccountReady;
+                    }
+                    Attention = m.TryGetProperty("attention", out var attention) ? attention.GetInt32() : 0;
+                    break;
+                case "server-failed":
+                    Status = "Not running";
+                    Error = "The server stopped repeatedly. Check the logs before starting it again.";
+                    break;
                 case "stopped": Status = "Not running"; stopped?.TrySetResult(true); break;
                 case "account-result": if (m.GetProperty("requestId").GetString() == accountId) account?.TrySetResult(m.Clone()); break;
                 case "error": Error = "The action could not complete. Check folders, port and the recovery journal."; break;
             }
-            if(before!=(Status,AccountReady,Attention,Error,UpdateState))Notify();
+            if(before!=(Status,AccountReady,NeedsAccountSetup,Attention,Error,UpdateState))Notify();
         } } catch { Error = "The local manager disconnected. Stop and inspect the recovery journal."; }
         finally { if(ReferenceEquals(child,process)){job.Dispose();if(!disposed)job=new Job();}Status = "Not running"; Notify(); }
     }
