@@ -10,7 +10,7 @@ Install the installer matching your PC from GitHub Releases. Choose **Set Up Swi
 
 Left-click the tray icon to open a running Switchboard; otherwise it opens Settings. Right-click for Open, Start, Stop, Restart, Settings, Show Logs and Quit. Closing Settings leaves the app running. Quit waits for owned server shutdown and installation cleanup.
 
-Settings contains Account, Startup, and Updates. **Windows app** is the tray manager; **Server** runs Switchboard in your browser. App updates check stable releases daily and ask before downloading and installing. Server installation is manual, preserves data, and leaves the server stopped. Choose Stable or Development; Development requires published compatible prereleases. Advanced contains folders, networking, optional version pinning, reinstall and lock recovery.
+General shows the server and account status, startup preferences, and app and server updates. When connections need attention, the tray menu offers **Sign in to connections (N)** and opens Connections in the browser. **Windows app** is the tray manager; **Server** runs Switchboard in your browser. App updates check stable releases daily and ask before downloading and installing. Server installation is manual, preserves data, and leaves the server stopped. Choose Stable or Development; Development requires published compatible prereleases. Advanced contains folders, networking, optional version pinning, reinstall and lock recovery.
 
 Login startup is off initially. Starting the server when the app opens is a separate preference. Windows may disable a startup entry in Startup Apps; use Windows Settings to re-enable it.
 
@@ -32,6 +32,6 @@ See [release setup](development/releases/README.md) for signing prerequisites. A
 
 ### GitHub rate limits
 
-In **Settings → Updates**, optionally save a GitHub personal access token before or after setup. The token is masked while entering and stored for your Windows user in Credential Manager. Choose public repositories only with no additional permissions; see [GitHub token setup](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). Use **Save Token** to replace it or **Remove Token** to return to anonymous requests.
+In **Settings → General**, below Updates, optionally save a GitHub personal access token before or after setup. The token is masked while entering and stored for your Windows user in Credential Manager. Choose public repositories only with no additional permissions; see [GitHub token setup](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). Use **Save Token** to replace it or **Remove Token** to return to anonymous requests.
 
 The app uses it for server release listings and revision verification. An updated server runtime also uses it only after a rate-limit response during plugin installation, including catalog browsing and dependencies. It is not used for plugin updates, plugin update checks, server updates or a GitHub connection. Token changes affect new desktop requests immediately; stop and start the local server to apply changes there. Older server runtimes ignore the installation token.
