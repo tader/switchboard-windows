@@ -16,9 +16,13 @@ class Program {
     }
     static bool HasText(Window window,string text) => Descendants(window).OfType<TextBlock>().Any(t=>t.Text==text);
     static bool HasButton(Window window,string label) => Descendants(window).OfType<Button>().Any(b=>Equals(b.Content,label));
-    static void Capture(Window window,string directory,string name,int width) {
+    static void Capture(MainWindow window,string directory,string name,int width,bool scrollToBottom=false) {
         window.Width=width;
-        window.Height=1000;
+        window.Height=760;
+        window.Refresh();
+        window.UpdateLayout();
+        var scroll=(ScrollViewer)window.Content;
+        if(scrollToBottom)scroll.ScrollToBottom();else scroll.ScrollToTop();
         window.UpdateLayout();
         var bitmap=new RenderTargetBitmap((int)window.ActualWidth,(int)window.ActualHeight,96,96,PixelFormats.Pbgra32);
         bitmap.Render(window);
@@ -108,9 +112,13 @@ class Program {
                 Require(HasText(window,"Available 2.4.0") && HasText(window,"Selected release 2.5.0"),"Candidate versions missing");
                 foreach(var theme in new[]{ThemeMode.Light,ThemeMode.Dark}) foreach(var width in new[]{600,460}) {
                     app.ThemeMode=theme;
+                    window.ThemeMode=theme;
                     Capture(window,directory,$"settings-updates-{theme}-{width}.png",width);
                 }
 
+                app.ThemeMode=ThemeMode.Light;
+                window.ThemeMode=ThemeMode.Light;
+                Capture(window,directory,"settings-token-entry.png",600,scrollToBottom:true);
                 store.Save(syntheticToken);
                 window.ShowAppUpdateResult(null);
                 window.ShowServerUpdateResult(settings.Channel,settings.Pin,manager.RuntimeVersion,manager.RuntimeVersion);
@@ -118,7 +126,7 @@ class Program {
                 Require(Descendants(window).OfType<TextBlock>().Count(t=>t.Text=="Up to date")==2,"Confirmed update statuses missing");
                 Require(HasButton(window,"Remove Token") && !HasButton(window,"Save Token") && !HasButton(window,"Create a GitHub Token…")
                     && !Descendants(window).OfType<PasswordBox>().Any(),"Stored token controls are incorrect");
-                Capture(window,directory,"settings-token-stored.png",600);
+                Capture(window,directory,"settings-token-stored.png",600,scrollToBottom:true);
             } finally { window.Hide(); store.Remove(); }
             Require(!window.IsVisible,"Closing settings failed");
             if(args.Length>1) {
@@ -160,7 +168,7 @@ class Program {
                 var readyWindow=new MainWindow(local,store,true);
                 readyWindow.Show();
                 try {
-                    Capture(readyWindow,directory,"settings-account-recovery.png",600);
+                    Capture(readyWindow,directory,"settings-account-recovery.png",600,scrollToBottom:true);
                     Require(!HasButton(readyWindow,"Continue Account Setup…") && HasButton(readyWindow,"Recover Password…"),
                         "Ready account controls are incorrect");
                 } finally { readyWindow.Hide(); }
