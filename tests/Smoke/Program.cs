@@ -114,6 +114,15 @@ class Program {
                     app.ThemeMode=theme;
                     window.ThemeMode=theme;
                     Capture(window,directory,$"settings-updates-{theme}-{width}.png",width);
+                    var blocks=Descendants(window).OfType<TextBlock>().ToArray();
+                    var appLabel=blocks.Single(t=>t.Text=="Windows app").TranslatePoint(new Point(),window);
+                    var serverLabel=blocks.Single(t=>t.Text=="Server").TranslatePoint(new Point(),window);
+                    Require(width==600 ? serverLabel.X>appLabel.X && serverLabel.Y==appLabel.Y :
+                        serverLabel.X==appLabel.X && serverLabel.Y>appLabel.Y,"Update panels are arranged incorrectly");
+                    var channelLabel=Descendants(window).OfType<Label>().Single(l=>Equals(l.Content,"Channel"));
+                    Require(channelLabel.Target is ComboBox combo &&
+                        Math.Abs(channelLabel.TranslatePoint(new Point(0,channelLabel.ActualHeight/2),window).Y -
+                            combo.TranslatePoint(new Point(0,combo.ActualHeight/2),window).Y)<1,"Channel picker is misaligned");
                 }
 
                 app.ThemeMode=ThemeMode.Light;

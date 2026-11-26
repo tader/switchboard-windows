@@ -21,8 +21,8 @@ public sealed class MainWindow : Window {
     internal MainWindow(Manager model, GithubTokenStore tokenStore, bool appUpdatesAvailable) {
         manager=model; this.tokenStore=tokenStore; this.appUpdatesAvailable=appUpdatesAvailable;Title="Switchboard";Width=600;Height=760;MinWidth=460;MinHeight=500;Content=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};Microsoft.Win32.SystemEvents.UserPreferenceChanged+=(_,_)=>Dispatcher.Invoke(Refresh);Closing+=(_,e)=>{e.Cancel=true;Hide();};Refresh();}
     void Text(string value,bool heading=false) {body.Children.Add(new TextBlock{Foreground=Foreground,Text=value,TextWrapping=TextWrapping.Wrap,FontSize=heading?20:14,FontWeight=heading?FontWeights.SemiBold:FontWeights.Normal,Margin=new Thickness(0,heading?20:6,0,6)});}
-    void Button(string label,Func<Task> action,bool enabled=true) {var b=new System.Windows.Controls.Button{Content=label,IsEnabled=enabled,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,5,0,5),Padding=new Thickness(12,6,12,6)};b.Click+=async(_,_)=>{try{await action();}catch(Exception e){System.Windows.MessageBox.Show(this,e.Message,"Switchboard");}Refresh();};body.Children.Add(b);}
-    void Toggle(string label,bool value,Action<bool> change) {var c=new CheckBox{Content=label,IsChecked=value,Margin=new Thickness(0,8,0,8)};c.Click+=(_,_)=>{change(c.IsChecked==true);manager.Settings.Save();};body.Children.Add(c);}
+    void Button(string label,Func<Task> action,bool enabled=true,Panel? parent=null) {var b=new System.Windows.Controls.Button{Content=label,IsEnabled=enabled,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,5,0,5),Padding=new Thickness(12,6,12,6)};b.Click+=async(_,_)=>{try{await action();}catch(Exception e){System.Windows.MessageBox.Show(this,e.Message,"Switchboard");}Refresh();};(parent??body).Children.Add(b);}
+    void Toggle(string label,bool value,Action<bool> change,Panel? parent=null) {var c=new CheckBox{Content=label,IsChecked=value,Margin=new Thickness(0,8,0,8)};c.Click+=(_,_)=>{change(c.IsChecked==true);manager.Settings.Save();};(parent??body).Children.Add(c);}
     public void Refresh() {
         Dispatcher.Invoke(()=>{
             if (System.Windows.Input.Keyboard.FocusedElement is FrameworkElement focused && IsAncestorOf(focused) && focused is TextBox or PasswordBox) return;
@@ -105,24 +105,44 @@ public sealed class MainWindow : Window {
 
     void UpdateSettings() {
         Text("Updates",true);
-        Text("Windows app");
+        var updates = new Grid();
+        updates.ColumnDefinitions.Add(new ColumnDefinition());
+        updates.ColumnDefinitions.Add(new ColumnDefinition());
+        updates.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
+        updates.RowDefinitions.Add(new RowDefinition { Height=GridLength.Auto });
+        var app = new StackPanel();
+        var server = new StackPanel();
+        updates.Children.Add(app);
+        updates.Children.Add(server);
+        void ArrangeUpdatePanels(double width) {
+            var sideBySide = width >= 500;
+            updates.ColumnDefinitions[1].Width = sideBySide ? new GridLength(1,GridUnitType.Star) : new GridLength(0);
+            Grid.SetColumn(server, sideBySide ? 1 : 0);
+            Grid.SetRow(server, sideBySide ? 0 : 1);
+            server.Margin = sideBySide ? new Thickness(12,0,0,0) : new Thickness(0,14,0,0);
+        }
+        ArrangeUpdatePanels(ActualWidth-64);
+        updates.SizeChanged+=(_,e)=>{if(e.WidthChanged)ArrangeUpdatePanels(e.NewSize.Width);};
+        body.Children.Add(updates);
+
+        app.Children.Add(new TextBlock { Text="Windows app", FontSize=14, FontWeight=FontWeights.SemiBold });
         var appVersion = typeof(MainWindow).Assembly.GetName().Version?.ToString(3);
-        VersionComparison(appVersion, appUpdateResult ?? (appUpdatesAvailable ? null : "Updates unavailable in this build"));
+        VersionComparison(app, appVersion, appUpdateResult ?? (appUpdatesAvailable ? null : "Updates unavailable in this build"));
         if (appUpdatesAvailable) {
-            Toggle("Check for app updates automatically",manager.Settings.AutomaticAppChecks,v=>manager.Settings.AutomaticAppChecks=v);
-            Button("Check for App Updates…",()=>AppUpdates.Check(this,manager),!manager.Busy);
+            Toggle("Check for app updates automatically",manager.Settings.AutomaticAppChecks,v=>manager.Settings.AutomaticAppChecks=v,app);
+            Button("Check for App Updates…",()=>AppUpdates.Check(this,manager),!manager.Busy,app);
         }
 
-        Text("Server");
+        server.Children.Add(new TextBlock { Text="Server", FontSize=14, FontWeight=FontWeights.SemiBold });
         var installed = manager.RuntimeVersion;
         var selected = serverRelease is { } release && (release.Channel,release.Pin,release.Installed)==(manager.Settings.Channel,manager.Settings.Pin,installed)
             ? release.Selected : null;
-        VersionComparison(installed, selected == null ? null : selected == installed ? "Up to date" : $"Selected release {selected}");
+        VersionComparison(server, installed, selected == null ? null : selected == installed ? "Up to date" : $"Selected release {selected}");
 
         var channel=new ComboBox {
             ItemsSource=new[]{"Stable (recommended)","Development"},
             SelectedIndex=manager.Settings.Channel=="development"?1:0,
-            Margin=new Thickness(0,8,0,0), HorizontalAlignment=HorizontalAlignment.Left,
+            HorizontalAlignment=HorizontalAlignment.Left, VerticalAlignment=VerticalAlignment.Center,
             IsEnabled=manager.Settings.Pin==null && !manager.Busy && !checkingServerRelease
         };
         System.Windows.Automation.AutomationProperties.SetName(channel,"Server update channel");
@@ -132,7 +152,13 @@ public sealed class MainWindow : Window {
             serverRelease=null;
             Refresh();
         };
-        body.Children.Add(channel);
+        var channelRow = new DockPanel { Margin=new Thickness(0,8,0,0) };
+        channelRow.Children.Add(new Label {
+            Content="Channel", Target=channel, Padding=new Thickness(0,0,8,0),
+            VerticalAlignment=VerticalAlignment.Center
+        });
+        channelRow.Children.Add(channel);
+        server.Children.Add(channelRow);
         Button(checkingServerRelease ? "Checking for Server Updates…" : "Check for Server Updates",async()=>{
             if (checkingServerRelease || manager.Busy) return;
             var selection = (manager.Settings.Channel,manager.Settings.Pin,installed);
@@ -143,19 +169,19 @@ public sealed class MainWindow : Window {
                 var tag=await RuntimeInstaller.SelectedTag(selection.Channel,selection.Pin);
                 ShowServerUpdateResult(selection.Channel,selection.Pin,selection.installed,tag.TrimStart('v'));
             } finally { checkingServerRelease=false; }
-        },!manager.Busy && !checkingServerRelease);
+        },!manager.Busy && !checkingServerRelease,server);
         if (selected != null && selected != installed)
             Button(manager.Running?"Stop & Install Server Release…":"Install Server Release…",async()=>{
                 if(System.Windows.MessageBox.Show(this,"Install the selected server release? Your data is kept and the server will be left stopped.","Server update",MessageBoxButton.OKCancel)==MessageBoxResult.OK)
                     await manager.Work(manager.InstallCore);
-            },!manager.Busy);
+            },!manager.Busy,server);
     }
 
-    void VersionComparison(string? installed, string? result) {
+    void VersionComparison(Panel panel, string? installed, string? result) {
         var row=new WrapPanel { Margin=new Thickness(0,0,0,4) };
         row.Children.Add(new TextBlock { Text=installed=="Not installed" ? installed : $"Installed {installed}", Margin=new Thickness(0,0,14,0) });
         if (result != null) row.Children.Add(new TextBlock { Text=result });
-        body.Children.Add(row);
+        panel.Children.Add(row);
     }
 
     void TokenSettings() {
