@@ -402,7 +402,7 @@ public sealed class MainWindow : Window {
     void UpdateSaveFooter() {
         footer.Children.Clear();
         if (advancedFeedback != null) {
-            LiveMessage(advancedFeedback,footer,advancedFeedback!=announcedFeedback);
+            LiveMessage(advancedErrorField!=null?"Settings could not be saved.":advancedFeedback,footer,advancedFeedback!=announcedFeedback);
             announcedFeedback=advancedFeedback;
         }
         else if (edits.Count>0) LiveMessage("Unsaved changes",footer,announce:false);
@@ -461,7 +461,8 @@ public sealed class MainWindow : Window {
         if (edits.Count>0) {
             if (!IsVisible) { Show(); Activate(); }
             var choice=new Window {
-                Title="Unsaved settings", Owner=this, SizeToContent=SizeToContent.WidthAndHeight,
+                Title="Unsaved settings", Owner=this, Background=Background, Foreground=Foreground,
+                SizeToContent=SizeToContent.WidthAndHeight,
                 WindowStartupLocation=WindowStartupLocation.CenterOwner, ResizeMode=ResizeMode.NoResize
             };
             var panel=new StackPanel { Margin=new Thickness(20) };
@@ -571,6 +572,7 @@ public sealed class MainWindow : Window {
         var session=manager.Session;
         var window=new Window {
             Title="Recover a password", Width=420, SizeToContent=SizeToContent.Height, Owner=this,
+            Background=Background, Foreground=Foreground,
             WindowStartupLocation=WindowStartupLocation.CenterOwner, ResizeMode=ResizeMode.NoResize
         };
         var panel=new StackPanel { Margin=new Thickness(24) };

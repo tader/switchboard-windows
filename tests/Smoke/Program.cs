@@ -234,9 +234,15 @@ class Program {
                     Require(link.Focusable && System.Windows.Input.KeyboardNavigation.GetIsTabStop(link) &&
                         link.NavigateUri.AbsoluteUri=="https://github.com/settings/personal-access-tokens/new","Token creation link is inaccessible");
                 }
-                Capture(window,directory,"settings-first-setup.png",600);
-                Require(HasText(window,"Server · Setup required") && !HasButton(window,"Open Windows Startup Apps"),
-                    "First setup status or startup recovery visibility is incorrect");
+                using(var unconfigured=new Manager(new Settings { DataPath=settings.DataPath, StatePath=settings.StatePath })) {
+                    var firstRun=new MainWindow(unconfigured,store,false);
+                    firstRun.Show();
+                    try {
+                        Capture(firstRun,directory,"settings-first-setup.png",600);
+                        Require(HasText(firstRun,"Server · Setup required") && HasText(firstRun,"Not installed") &&
+                            !HasButton(firstRun,"Open Windows Startup Apps"),"First setup status or startup recovery visibility is incorrect");
+                    } finally { firstRun.Hide(); window.Activate(); }
+                }
                 void Select(string label) {
                     Descendants(window).OfType<RadioButton>().Single(tab=>Equals(tab.Content,label)).IsChecked=true;
                     window.UpdateLayout();
