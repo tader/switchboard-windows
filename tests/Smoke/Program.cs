@@ -5,6 +5,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.IO;
+using Forms=System.Windows.Forms;
 class Program {
     static void Require(bool value,string message){if(!value)throw new Exception(message);}
     static void Wait(Task task) {var frame=new System.Windows.Threading.DispatcherFrame();var timer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(50)};timer.Tick+=(_,_)=>{if(task.IsCompleted)frame.Continue=false;};timer.Start();System.Windows.Threading.Dispatcher.PushFrame(frame);timer.Stop();task.GetAwaiter().GetResult();}
@@ -22,15 +23,46 @@ class Program {
         window.Height=760;
         window.Refresh();
         window.UpdateLayout();
-        var scroll=(ScrollViewer)window.Content;
+        var scroll=Descendants(window).OfType<ScrollViewer>().First();
         if(scrollToBottom)scroll.ScrollToBottom();else scroll.ScrollToTop();
         window.UpdateLayout();
+        Render(window,directory,name);
+    }
+    static void Render(Window window,string directory,string name) {
         var bitmap=new RenderTargetBitmap((int)window.ActualWidth,(int)window.ActualHeight,96,96,PixelFormats.Pbgra32);
         bitmap.Render(window);
         var encoder=new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var output=File.Create(Path.Combine(directory,name));
         encoder.Save(output);
+    }
+    static void TrayChecks(string directory) {
+        using var source=System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Switchboard;component/Assets/AppIcon.ico"))!.Stream;
+        var invoked=0;
+        using var tray=new TrayPresentation(new System.Drawing.Icon(source),()=>invoked++);
+        var item=tray.Menu.Items[0];
+        var normal=tray.CurrentIcon;
+        Require(!item.Available,"Sign-in action visible without a ready count");
+        tray.Update("Running on this PC",1);
+        Require(item.Available && item.Text=="Sign in to connections (1)" &&
+            tray.Tooltip=="Switchboard: 1 connection needs sign-in" && tray.CurrentIcon!=normal,"Singular tray badge state is incorrect");
+        item.PerformClick();
+        Require(invoked==1,"Tray action did not invoke its handler");
+        tray.Update("Running on this PC",2);
+        Require(item.Text=="Sign in to connections (2)" && tray.Tooltip=="Switchboard: 2 connections need sign-in",
+            "Plural tray state is incorrect");
+        tray.Menu.Items.Add("Settings…");
+        tray.Menu.Items.Add("Open Switchboard");
+        tray.Menu.Show(System.Drawing.Point.Empty);
+        try {
+            using var menu=new System.Drawing.Bitmap(tray.Menu.Width,tray.Menu.Height);
+            tray.Menu.DrawToBitmap(menu,tray.Menu.ClientRectangle);
+            menu.Save(Path.Combine(directory,"tray-sign-in-menu.png"));
+            using var badge=tray.CurrentIcon.ToBitmap();
+            badge.Save(Path.Combine(directory,"tray-sign-in-icon.png"));
+        } finally { tray.Menu.Close(); }
+        tray.Update("Not running",0);
+        Require(!item.Available && tray.CurrentIcon==normal && tray.Tooltip=="Switchboard: Not running","Tray badge did not clear");
     }
     [STAThread] static int Main(string[] args) {
         using var deadline=new System.Threading.Timer(_=>Environment.FailFast("Smoke test deadline exceeded"),null,TimeSpan.FromMinutes(3),Timeout.InfiniteTimeSpan);
@@ -94,7 +126,7 @@ class Program {
             settings.RuntimePath=Path.Combine(root,"VersionFixture");
             Directory.CreateDirectory(settings.RuntimePath);
             File.WriteAllText(Path.Combine(settings.RuntimePath,"runtime.json"),"""{"version":"2.3.0"}""");
-            using var manager=new Manager(settings);
+            using var manager=new Manager(settings,_=>throw new IOException("Synthetic settings write failure."));
             var window=new MainWindow(manager,store,true);
             try {
                 window.Show();
@@ -122,8 +154,8 @@ class Program {
                         serverLabel.X==appLabel.X && serverLabel.Y>appLabel.Y,"Update panels are arranged incorrectly");
                     var channelLabel=Descendants(window).OfType<Label>().Single(l=>Equals(l.Content,"Channel"));
                     Require(channelLabel.Target is ComboBox combo &&
-                        Math.Abs(channelLabel.TranslatePoint(new Point(0,channelLabel.ActualHeight/2),window).Y -
-                            combo.TranslatePoint(new Point(0,combo.ActualHeight/2),window).Y)<1,"Channel picker is misaligned");
+                        Math.Abs(channelLabel.TranslatePoint(new Point(),window).X -
+                            combo.TranslatePoint(new Point(),window).X)<1,"Channel picker is misaligned");
                 }
 
                 app.ThemeMode=ThemeMode.Light;
@@ -142,6 +174,32 @@ class Program {
                     Require(link.Focusable && System.Windows.Input.KeyboardNavigation.GetIsTabStop(link) &&
                         link.NavigateUri.AbsoluteUri=="https://github.com/settings/personal-access-tokens/new","Token creation link is inaccessible");
                 }
+                Capture(window,directory,"settings-first-setup.png",600);
+                Require(HasText(window,"Server · Setup required") && !HasButton(window,"Open Windows Startup Apps"),
+                    "First setup status or startup recovery visibility is incorrect");
+                void Select(string label) {
+                    Descendants(window).OfType<RadioButton>().Single(tab=>Equals(tab.Content,label)).IsChecked=true;
+                    window.UpdateLayout();
+                }
+                TextBox Port() => (TextBox)Descendants(window).OfType<Label>().Single(label=>Equals(label.Content,"Port")).Target;
+                void Save() => Descendants(window).OfType<Button>().Single(button=>Equals(button.Content,"Save Changes"))
+                    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Select("Advanced");
+                Port().Text="80";
+                Select("General");
+                window.Hide();
+                window.Show();
+                Select("Advanced");
+                Require(Port().Text=="80","Advanced draft was lost after navigation and hide");
+                Save();
+                Capture(window,directory,"settings-advanced-validation.png",460);
+                Require(HasText(window,"Enter a port from 1024 to 65535.") && Port().Text=="80","Port validation lost the draft or explanation");
+                Port().Text="8771";
+                Save();
+                Capture(window,directory,"settings-advanced-save-error.png",600);
+                Require(HasText(window,"Synthetic settings write failure.") && Port().Text=="8771" && manager.Settings.Port==8770,
+                    "Failed save lost the draft or changed committed settings");
+                Select("General");
                 store.Save(syntheticToken);
                 window.ShowAppUpdateResult(null);
                 window.ShowServerUpdateResult(settings.Channel,settings.Pin,manager.RuntimeVersion,manager.RuntimeVersion);
@@ -165,7 +223,7 @@ class Program {
                 setupWindow.Show();
                 try {
                     Capture(setupWindow,directory,"settings-running-first-admin.png",600);
-                    Require(HasText(setupWindow,"Running on this PC") && HasButton(setupWindow,"Continue Account Setup…"),"Running setup controls missing");
+                    Require(HasText(setupWindow,"Server · Running on this PC") && HasButton(setupWindow,"Continue Account Setup…"),"Running setup controls missing");
                     Require(!HasButton(setupWindow,"Recover Password…"),"Recovery appeared before account setup");
                 } finally { setupWindow.Hide(); }
                 using(var http=new System.Net.Http.HttpClient())
@@ -192,7 +250,7 @@ class Program {
                 readyWindow.Show();
                 try {
                     Capture(readyWindow,directory,"settings-account-recovery.png",600,scrollToBottom:true);
-                    Require(!HasButton(readyWindow,"Continue Account Setup…") && HasButton(readyWindow,"Recover Password…"),
+                    Require(HasText(readyWindow,"Account ready") && !HasButton(readyWindow,"Continue Account Setup…") && HasButton(readyWindow,"Recover Password…"),
                         "Ready account controls are incorrect");
                 } finally { readyWindow.Hide(); }
                 Wait(local.Stop());Require(!local.Running,"Owned server remained running");
@@ -202,6 +260,7 @@ class Program {
                 Wait(Task.Run(async()=>{var until=DateTime.UtcNow.AddSeconds(20);while(local.Status!="Not running"){if(DateTime.UtcNow>until)throw new Exception("Supervisor crash cleanup timed out");await Task.Delay(100);}}));
                 Wait(Task.Run(async()=>{using var http=new System.Net.Http.HttpClient();var until=DateTime.UtcNow.AddSeconds(20);while(true){try{await http.GetAsync(owned.BrowserUrl+"/readyz");}catch(System.Net.Http.HttpRequestException){break;}if(DateTime.UtcNow>until)throw new Exception("Crash left an owned server running");await Task.Delay(100);}}));
             }
+            TrayChecks(directory);
             Console.WriteLine("PASS: settings validation, exclusive lock recovery, verified relocation, WPF layout and screenshot render.");
             return 0;
         }finally{

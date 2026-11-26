@@ -25,11 +25,24 @@ public sealed class Settings {
         new DirectoryInfo(path).SetAccessControl(acl);
     }
     public void Validate() {
+        ValidateFolders();
+        ValidateAddress();
+        ValidatePort();
+        ValidateBrowserUrl();
+    }
+    internal void ValidateFolders() {
         var data = Canonical(DataPath).TrimEnd('\\'); var state = Canonical(StatePath).TrimEnd('\\');
         if (!Path.IsPathFullyQualified(DataPath) || !Path.IsPathFullyQualified(StatePath) || data.StartsWith("\\\\") || state.StartsWith("\\\\") || data.Equals(state, StringComparison.OrdinalIgnoreCase) || data.StartsWith(state + "\\", StringComparison.OrdinalIgnoreCase) || state.StartsWith(data + "\\", StringComparison.OrdinalIgnoreCase)) throw new Exception("Choose separate, absolute local data and updater folders.");
         foreach(var folder in new[]{data,state}) { if(Path.GetPathRoot(folder)?.TrimEnd('\\').Equals(folder.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase)==true || new DriveInfo(Path.GetPathRoot(folder)!).DriveFormat!="NTFS")throw new Exception("Choose user-owned folders on a local NTFS drive, not a drive root."); }
         if(RuntimePath!=null){var runtime=Canonical(RuntimePath).TrimEnd('\\');if(data.Equals(runtime,StringComparison.OrdinalIgnoreCase)||data.StartsWith(runtime+"\\",StringComparison.OrdinalIgnoreCase)||runtime.StartsWith(data+"\\",StringComparison.OrdinalIgnoreCase)||state.Equals(runtime,StringComparison.OrdinalIgnoreCase)||state.StartsWith(runtime+"\\",StringComparison.OrdinalIgnoreCase))throw new Exception("Runtime, data and updater folders overlap.");}
-        if (Port < 1024 || Port > 65535 || Host != "localhost" && !System.Net.IPAddress.TryParse(Host, out _)) throw new Exception("Choose a local IP address and a port from 1024 to 65535.");
+    }
+    internal void ValidateAddress() {
+        if (Host != "localhost" && !System.Net.IPAddress.TryParse(Host, out _)) throw new Exception("Enter localhost or a local IP address.");
+    }
+    internal void ValidatePort() {
+        if (Port < 1024 || Port > 65535) throw new Exception("Enter a port from 1024 to 65535.");
+    }
+    internal void ValidateBrowserUrl() {
         if (!Uri.TryCreate(BrowserUrl, UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https") || url.UserInfo.Length > 0) throw new Exception("Enter an HTTP or HTTPS browser URL without credentials.");
     }
     [System.Runtime.InteropServices.DllImport("kernel32.dll",CharSet=System.Runtime.InteropServices.CharSet.Unicode,SetLastError=true)] static extern bool MoveFileEx(string source,string target,int flags);
