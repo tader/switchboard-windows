@@ -13,13 +13,17 @@ public static class RuntimeInstaller {
     private static readonly HttpClient client = new() { Timeout = TimeSpan.FromMinutes(10), DefaultRequestHeaders = { { "User-Agent", "switchboard-windows" } } };
     public static async Task<JsonElement[]> Releases(int page=1,CancellationToken cancellation=default) => JsonSerializer.Deserialize<JsonElement[]>(await GithubApi.Get("https://api.github.com/repos/tader/switchboard/releases?per_page=100&page="+page,cancellation))!;
     public static SqliteConnection Lease(string file) { var db = new SqliteConnection($"Data Source={file};Default Timeout=1;Pooling=False"); db.Open(); using var cmd = db.CreateCommand(); cmd.CommandText = "CREATE TABLE IF NOT EXISTS lease(id INTEGER); BEGIN EXCLUSIVE;"; cmd.ExecuteNonQuery(); return db; }
-    public static async Task<string> Install(Settings settings, Action<string> progress, CancellationToken cancellation = default) {
-        settings.Validate(); Settings.PrivateFolder(settings.StatePath);
+    internal static async Task<string> SelectedTag(string channel, string? pin, CancellationToken cancellation = default) {
         var releases = await Releases(1,cancellation);
         var name = $"runtime-win32-{Arch}.json";
-        var release = releases.FirstOrDefault(r => !r.GetProperty("draft").GetBoolean() && (settings.Pin != null ? r.GetProperty("tag_name").GetString() == settings.Pin : r.GetProperty("prerelease").GetBoolean() == (settings.Channel == "development")) && r.GetProperty("assets").EnumerateArray().Any(a => a.GetProperty("name").GetString() == name));
+        var release = releases.FirstOrDefault(r => !r.GetProperty("draft").GetBoolean() && (pin != null ? r.GetProperty("tag_name").GetString() == pin : r.GetProperty("prerelease").GetBoolean() == (channel == "development")) && r.GetProperty("assets").EnumerateArray().Any(a => a.GetProperty("name").GetString() == name));
         if (release.ValueKind == JsonValueKind.Undefined) throw new Exception("No compatible Windows runtime is published for this selection yet.");
-        var tag = release.GetProperty("tag_name").GetString()!;
+        return release.GetProperty("tag_name").GetString()!;
+    }
+    public static async Task<string> Install(Settings settings, Action<string> progress, CancellationToken cancellation = default) {
+        settings.Validate(); Settings.PrivateFolder(settings.StatePath);
+        var tag = await SelectedTag(settings.Channel, settings.Pin, cancellation);
+        var name = $"runtime-win32-{Arch}.json";
         var prefix = "https://github.com/tader/switchboard/releases/download/" + Uri.EscapeDataString(tag) + "/";
         var manifest = JsonDocument.Parse(await client.GetStringAsync(prefix + name)).RootElement.Clone();
         var revision = manifest.GetProperty("revision").GetString()!;

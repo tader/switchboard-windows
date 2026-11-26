@@ -14,15 +14,17 @@ public static class AppUpdates {
     private static readonly bool enabled=false;
 #endif
 
+    internal static bool CanCheck => enabled &&
+        new UpdateManager("https://github.com/tader/switchboard-windows/releases/latest/download/").IsInstalled;
+
     public static bool VerifyFeed(byte[] data, byte[] signature, string pem) {using var key=ECDsa.Create();key.ImportFromPem(pem);return key.VerifyData(data,signature,HashAlgorithmName.SHA256,DSASignatureFormat.Rfc3279DerSequence);}
 
     public static async Task Check(Window owner, Manager manager, bool automatic = false) {
-        if(!enabled){if(!automatic)System.Windows.MessageBox.Show(owner,"App updates are disabled in development builds.","Windows app updates");return;}
+        if(!CanCheck){if(!automatic)System.Windows.MessageBox.Show(owner,"App updates are disabled in development builds.","Windows app updates");return;}
         if (busy || manager.Busy) return;
         busy = true;
         string? temporary = null;
         try {
-            if(!new UpdateManager("https://github.com/tader/switchboard-windows/releases/latest/download/").IsInstalled){if(!automatic)System.Windows.MessageBox.Show(owner,"App updates are disabled in development builds.","Windows app updates");return;}
             var keyStream = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/update-public-key.pem"));
             if (keyStream == null) { if (!automatic) System.Windows.MessageBox.Show(owner,"App updates are not configured for this development build.","Windows app updates"); return; }
             var channel = "win-" + (System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64");
@@ -35,7 +37,11 @@ public static class AppUpdates {
             await File.WriteAllBytesAsync(Path.Combine(temporary,"releases." + channel + ".json"), feed);
             var updater = new UpdateManager(temporary, new UpdateOptions { ExplicitChannel = channel, MaximumDeltasBeforeFallback = -1 });
             var update = await updater.CheckForUpdatesAsync();
-            if (update == null) { if (!automatic) System.Windows.MessageBox.Show(owner,"The Windows app is up to date.","Windows app updates"); return; }
+            if (owner is MainWindow settingsWindow)
+                settingsWindow.ShowAppUpdateResult(update?.TargetFullRelease.Version.ToString());
+            else if (update == null && !automatic)
+                System.Windows.MessageBox.Show(owner,"The Windows app is up to date.","Windows app updates");
+            if (update == null) return;
             if(automatic){owner.Show();owner.Activate();}
             if (System.Windows.MessageBox.Show(owner,"Download and install the Windows app update? Switchboard will stop safely and the app will reopen.","Windows app update",MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
             var assets = JsonDocument.Parse(feed).RootElement.GetProperty("Assets").EnumerateArray().Where(a=>a.GetProperty("Type").GetString()=="Full").ToArray();
