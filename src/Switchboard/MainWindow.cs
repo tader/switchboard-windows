@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Shapes;
 using System.Windows.Media;
@@ -21,7 +22,7 @@ public sealed class MainWindow : Window {
     internal MainWindow(Manager model, GithubTokenStore tokenStore, bool appUpdatesAvailable) {
         manager=model; this.tokenStore=tokenStore; this.appUpdatesAvailable=appUpdatesAvailable;Title="Switchboard";Width=600;Height=760;MinWidth=460;MinHeight=500;Content=new ScrollViewer{Content=body,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};Microsoft.Win32.SystemEvents.UserPreferenceChanged+=(_,_)=>Dispatcher.Invoke(Refresh);Closing+=(_,e)=>{e.Cancel=true;Hide();};Refresh();}
     void Text(string value,bool heading=false) {body.Children.Add(new TextBlock{Foreground=Foreground,Text=value,TextWrapping=TextWrapping.Wrap,FontSize=heading?20:14,FontWeight=heading?FontWeights.SemiBold:FontWeights.Normal,Margin=new Thickness(0,heading?20:6,0,6)});}
-    void Button(string label,Func<Task> action,bool enabled=true,Panel? parent=null) {var b=new System.Windows.Controls.Button{Content=label,IsEnabled=enabled,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,5,0,5),Padding=new Thickness(12,6,12,6)};b.Click+=async(_,_)=>{try{await action();}catch(Exception e){System.Windows.MessageBox.Show(this,e.Message,"Switchboard");}Refresh();};(parent??body).Children.Add(b);}
+    System.Windows.Controls.Button Button(string label,Func<Task> action,bool enabled=true,Panel? parent=null) {var b=new System.Windows.Controls.Button{Content=label,IsEnabled=enabled,HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,5,0,5),Padding=new Thickness(12,6,12,6)};b.Click+=async(_,_)=>{try{await action();}catch(Exception e){System.Windows.MessageBox.Show(this,e.Message,"Switchboard");}Refresh();};(parent??body).Children.Add(b);return b;}
     void Toggle(string label,bool value,Action<bool> change,Panel? parent=null) {var c=new CheckBox{Content=label,IsChecked=value,Margin=new Thickness(0,8,0,8)};c.Click+=(_,_)=>{change(c.IsChecked==true);manager.Settings.Save();};(parent??body).Children.Add(c);}
     public void Refresh() {
         Dispatcher.Invoke(()=>{
@@ -54,7 +55,7 @@ public sealed class MainWindow : Window {
                 Toggle("Open app when I sign in to Windows",key?.GetValue("Switchboard")!=null,v=>{using var run=Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");if(v)run.SetValue("Switchboard","\""+Environment.ProcessPath+"\"");else run.DeleteValue("Switchboard",false);});
                 Button("Open Windows Startup Apps",()=>{Manager.OpenUrl("ms-settings:startupapps");return Task.CompletedTask;});
                 UpdateSettings();
-                TokenSettings();
+                TokenSettings(dark);
                 if (manager.ServerStarted && manager.AccountReady)
                     Button("Recover Password…",Recover,!manager.Busy);
                 else if (!manager.Running && manager.Settings.Configured)
@@ -184,7 +185,7 @@ public sealed class MainWindow : Window {
         panel.Children.Add(row);
     }
 
-    void TokenSettings() {
+    void TokenSettings(bool dark) {
         Text("GitHub token for higher rate limits (optional)",true);
         bool stored;
         try { stored=tokenStore.Read()!=null; }
@@ -198,19 +199,41 @@ public sealed class MainWindow : Window {
             },!manager.Busy&&!tokenSaving);
             return;
         }
-        var box=new PasswordBox { Password=tokenDraft, IsEnabled=!manager.Busy&&!tokenSaving, Margin=new Thickness(0,6,0,6) };
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width=GridLength.Auto });
+        var box=new PasswordBox {
+            Password=tokenDraft, IsEnabled=!manager.Busy&&!tokenSaving,
+            MinWidth=0, Margin=new Thickness(0,5,8,5)
+        };
         System.Windows.Automation.AutomationProperties.SetName(box,"GitHub token");
         box.PasswordChanged+=(_,_)=>tokenDraft=box.Password;
-        body.Children.Add(box);
-        Button("Save Token",async()=>{
+        row.Children.Add(box);
+        var save=Button("Save Token",async()=>{
             if(tokenSaving)return;
             var value=tokenDraft;
             tokenSaving=true;
             box.IsEnabled=false;
             try { await Task.Run(()=>tokenStore.Save(value)); tokenDraft=""; }
             finally { tokenSaving=false; }
-        },!manager.Busy&&!tokenSaving);
-        Button("Create a GitHub Token…",()=>{Manager.OpenUrl("https://github.com/settings/personal-access-tokens/new");return Task.CompletedTask;});
+        },!manager.Busy&&!tokenSaving,row);
+        Grid.SetColumn(save,1);
+        body.Children.Add(row);
+
+        var link = new Hyperlink(new Run("Create GitHub token…")) {
+            NavigateUri=new Uri("https://github.com/settings/personal-access-tokens/new"),
+            Focusable=true,
+            Foreground=SystemParameters.HighContrast ? SystemColors.HotTrackBrush :
+                new SolidColorBrush(dark ? Color.FromRgb(126,187,255) : Color.FromRgb(0,93,179))
+        };
+        link.RequestNavigate+=(_,e)=>{
+            e.Handled=true;
+            try { Manager.OpenUrl(e.Uri.AbsoluteUri); }
+            catch(Exception error) { System.Windows.MessageBox.Show(this,error.Message,"Switchboard"); }
+        };
+        var linkLine = new TextBlock { FontSize=14, Margin=new Thickness(0,6,0,6) };
+        linkLine.Inlines.Add(link);
+        body.Children.Add(linkLine);
     }
     async Task LoadVersions(ComboBox box){try{
         box.IsEnabled=false;

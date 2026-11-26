@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.IO;
 class Program {
     static void Require(bool value,string message){if(!value)throw new Exception(message);}
@@ -127,13 +128,26 @@ class Program {
 
                 app.ThemeMode=ThemeMode.Light;
                 window.ThemeMode=ThemeMode.Light;
-                Capture(window,directory,"settings-token-entry.png",600,scrollToBottom:true);
+                foreach (var width in new[]{600,460}) {
+                    Capture(window,directory,$"settings-token-entry-{width}.png",width,scrollToBottom:true);
+                    var controls=Descendants(window).ToArray();
+                    var field=controls.OfType<PasswordBox>().Single();
+                    var save=controls.OfType<Button>().Single(button=>Equals(button.Content,"Save Token"));
+                    var row=(Grid)field.Parent;
+                    Require(save.Parent==row && Grid.GetColumn(save)==1 &&
+                        field.TranslatePoint(new Point(field.ActualWidth,0),row).X < save.TranslatePoint(new Point(),row).X &&
+                        save.TranslatePoint(new Point(save.ActualWidth,0),row).X <= row.ActualWidth &&
+                        save.ActualWidth >= save.DesiredSize.Width,"Token save button does not fit beside the field");
+                    var link=controls.OfType<TextBlock>().SelectMany(block=>block.Inlines).OfType<Hyperlink>().Single();
+                    Require(link.Focusable && System.Windows.Input.KeyboardNavigation.GetIsTabStop(link) &&
+                        link.NavigateUri.AbsoluteUri=="https://github.com/settings/personal-access-tokens/new","Token creation link is inaccessible");
+                }
                 store.Save(syntheticToken);
                 window.ShowAppUpdateResult(null);
                 window.ShowServerUpdateResult(settings.Channel,settings.Pin,manager.RuntimeVersion,manager.RuntimeVersion);
                 window.UpdateLayout();
                 Require(Descendants(window).OfType<TextBlock>().Count(t=>t.Text=="Up to date")==2,"Confirmed update statuses missing");
-                Require(HasButton(window,"Remove Token") && !HasButton(window,"Save Token") && !HasButton(window,"Create a GitHub Token…")
+                Require(HasButton(window,"Remove Token") && !HasButton(window,"Save Token") && !Descendants(window).OfType<TextBlock>().SelectMany(block=>block.Inlines).OfType<Hyperlink>().Any()
                     && !Descendants(window).OfType<PasswordBox>().Any(),"Stored token controls are incorrect");
                 Capture(window,directory,"settings-token-stored.png",600,scrollToBottom:true);
             } finally { window.Hide(); store.Remove(); }
