@@ -36,6 +36,66 @@ class Program {
         using var output=File.Create(Path.Combine(directory,name));
         encoder.Save(output);
     }
+    static void ConnectionStatusChecks(string root,string core) {
+        var runtime=Path.Combine(root,"AttentionRuntime");
+        Directory.CreateDirectory(Path.Combine(runtime,"bin"));
+        Directory.CreateDirectory(Path.Combine(runtime,"updater"));
+        File.Copy(Path.Combine(core,"bin","node.exe"),Path.Combine(runtime,"bin","node.exe"));
+        var scenario=Path.Combine(runtime,"attention.txt");
+        File.WriteAllText(scenario,"2");
+        File.WriteAllText(Path.Combine(runtime,"updater","desktop.ts"),"""
+            import { readFileSync } from 'node:fs';
+            import * as readline from 'node:readline';
+            const lines = readline.createInterface({ input: process.stdin });
+            const emit = value => console.log(JSON.stringify(value));
+            lines.on('line', line => {
+              switch (JSON.parse(line).action) {
+                case 'start': emit({ event: 'started' }); break;
+                case 'status': {
+                  const value = readFileSync('attention.txt', 'utf8');
+                  if (value === 'silent') break;
+                  if (value === 'unknown') emit({ event: 'status' });
+                  else emit({ event: 'status', ready: true, attention: Number(value) });
+                  break;
+                }
+                case 'quit': emit({ event: 'stopped' }); process.exit(0);
+              }
+            });
+            """);
+        using var manager=new Manager(new Settings {
+            RuntimePath=runtime, Configured=true,
+            DataPath=Path.Combine(root,"AttentionData"), StatePath=Path.Combine(root,"AttentionState")
+        });
+        string? connectionUrl=null;
+        manager.ConnectionsBrowserOpener=value=>connectionUrl=value;
+        void Await(Func<bool> condition) => Wait(Task.Run(async()=>{
+            var deadline=DateTime.UtcNow.AddSeconds(15);
+            while(!condition()) {
+                if(DateTime.UtcNow>deadline)throw new Exception("Connection status did not refresh");
+                await Task.Delay(100);
+            }
+        }));
+        Wait(manager.Start());
+        Await(()=>manager.Attention==2);
+        manager.OpenConnections();
+        Require(connectionUrl=="http://127.0.0.1:8770/connections","Tray Connections action target is wrong");
+        File.WriteAllText(scenario,"0");
+        Await(()=>manager.Attention==0 && manager.AccountReady);
+        File.WriteAllText(scenario,"1");
+        Await(()=>manager.Attention==1);
+        File.WriteAllText(scenario,"unknown");
+        Await(()=>manager.Attention==0 && !manager.AccountReady);
+        File.WriteAllText(scenario,"2");
+        Await(()=>manager.Attention==2);
+        File.WriteAllText(scenario,"silent");
+        Await(()=>manager.Attention==0 && !manager.AccountReady);
+        File.WriteAllText(scenario,"2");
+        Await(()=>manager.Attention==2);
+        var stop=manager.Stop();
+        Require(manager.Attention==0,"Connection attention survived stop");
+        Wait(stop);
+    }
+
     static void TrayChecks(string directory) {
         using var source=System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Switchboard;component/Assets/AppIcon.ico"))!.Stream;
         var invoked=0;
@@ -252,6 +312,26 @@ class Program {
                     Capture(readyWindow,directory,"settings-account-recovery.png",600,scrollToBottom:true);
                     Require(HasText(readyWindow,"Account ready") && !HasButton(readyWindow,"Continue Account Setup…") && HasButton(readyWindow,"Recover Password…"),
                         "Ready account controls are incorrect");
+                    var captureDialog=new System.Windows.Threading.DispatcherTimer { Interval=TimeSpan.FromMilliseconds(100) };
+                    var dialogDeadline=DateTime.UtcNow.AddSeconds(10);
+                    var captured=false;
+                    captureDialog.Tick+=(_,_)=>{
+                        var dialog=readyWindow.OwnedWindows.OfType<Window>().SingleOrDefault(w=>w.IsVisible);
+                        if(dialog==null)return;
+                        var accounts=Descendants(dialog).OfType<ComboBox>().SingleOrDefault();
+                        if(accounts?.IsEnabled==true) {
+                            Render(dialog,directory,"settings-password-recovery-dialog.png");
+                            captured=true;
+                        }
+                        if(captured || DateTime.UtcNow>dialogDeadline)dialog.Close();
+                    };
+                    captureDialog.Start();
+                    try {
+                        Descendants(readyWindow).OfType<Button>().Single(b=>Equals(b.Content,"Recover Password…"))
+                            .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    } finally { captureDialog.Stop(); }
+                    Require(captured,"Password recovery dialog did not show the synthetic account");
+
                 } finally { readyWindow.Hide(); }
                 Wait(local.Stop());Require(!local.Running,"Owned server remained running");
                 Wait(local.Start());Wait(Task.Delay(1500));Wait(local.Stop());
@@ -261,6 +341,7 @@ class Program {
                 Wait(Task.Run(async()=>{using var http=new System.Net.Http.HttpClient();var until=DateTime.UtcNow.AddSeconds(20);while(true){try{await http.GetAsync(owned.BrowserUrl+"/readyz");}catch(System.Net.Http.HttpRequestException){break;}if(DateTime.UtcNow>until)throw new Exception("Crash left an owned server running");await Task.Delay(100);}}));
             }
             TrayChecks(directory);
+            if(args.Length>1) ConnectionStatusChecks(root,Path.GetFullPath(args[1]));
             Console.WriteLine("PASS: settings validation, exclusive lock recovery, verified relocation, WPF layout and screenshot render.");
             return 0;
         }finally{

@@ -22,7 +22,8 @@ public partial class App : System.Windows.Application {
         updateTimer.Tick += async (_, _) => await CheckUpdates(); updateTimer.Start();
         _ = Dispatcher.InvokeAsync(async () => { await Task.Delay(10000); await CheckUpdates(); });
         _=Task.Run(async()=>{while(!activationStop.IsCancellationRequested){try{using var pipe=new System.IO.Pipes.NamedPipeServerStream(pipeName,System.IO.Pipes.PipeDirection.In,1,System.IO.Pipes.PipeTransmissionMode.Byte,System.IO.Pipes.PipeOptions.Asynchronous|System.IO.Pipes.PipeOptions.CurrentUserOnly);await pipe.WaitForConnectionAsync(activationStop.Token);var bytes=new byte[32];var read=await pipe.ReadAsync(bytes,activationStop.Token);if(System.Text.Encoding.UTF8.GetString(bytes,0,read)=="show-settings")_ = Dispatcher.InvokeAsync(ShowSettings);}catch(OperationCanceledException){break;}catch(System.IO.IOException){}}});
-        var icon = new System.Drawing.Icon(GetResourceStream(new Uri("pack://application:,,,/Assets/AppIcon.ico"))!.Stream);
+        using var iconStream=GetResourceStream(new Uri("pack://application:,,,/Assets/AppIcon.ico"))!.Stream;
+        var icon = new System.Drawing.Icon(iconStream);
         tray = new TrayPresentation(icon, () => Dispatcher.Invoke(manager.OpenConnections));
         var menu = tray.Menu;
         Forms.ToolStripItem Add(string title, Action action) => menu.Items.Add(title, null, (_, _) => Dispatcher.Invoke(action));

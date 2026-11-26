@@ -22,7 +22,7 @@ public sealed class Manager : IDisposable {
         NeedsAccountSetup ? "Finish account setup" : null;
     public bool AccountReady { get; private set; }
     internal bool NeedsAccountSetup { get; private set; }
-    internal bool ServerStarted => Running && Status == "Running on this PC";
+    internal bool ServerStarted => Running && Status == "Running on this PC" && !stopping;
     public event Action? Changed;
     public void ApplySettings(Settings value) { saveSettings(value); Settings = value; Notify(); }
     public CancellationTokenSource? Installation { get; private set; }
@@ -30,7 +30,7 @@ public sealed class Manager : IDisposable {
     private Task? reader;
     private readonly SemaphoreSlim commands = new(1);
     private readonly System.Windows.Threading.DispatcherTimer poll = new() { Interval = TimeSpan.FromSeconds(2) };
-    private TaskCompletionSource<bool>? stopped;
+    private bool stopping;
     private TaskCompletionSource<JsonElement>? account;
     private string? accountId;
     private Job job = new();
@@ -69,8 +69,9 @@ public sealed class Manager : IDisposable {
     public static void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     public void ShowLogs() { global::Switchboard.Settings.PrivateFolder(Settings.StatePath);OpenUrl(Settings.StatePath); }
     public void Open() { if (ServerStarted) OpenUrl(Settings.BrowserUrl); }
+    internal Action<string> ConnectionsBrowserOpener { get; set; } = OpenUrl;
     internal void OpenConnections() {
-        if (ServerStarted && Attention > 0) OpenUrl(Settings.BrowserUrl.TrimEnd('/')+"/connections");
+        if (ServerStarted && Attention > 0) ConnectionsBrowserOpener(Settings.BrowserUrl.TrimEnd('/')+"/connections");
     }
     public async Task Start() {
         if (Busy || Running) return;
@@ -101,7 +102,7 @@ public sealed class Manager : IDisposable {
             var m = JsonDocument.Parse(line).RootElement;
             switch (m.GetProperty("event").GetString()) {
                 case "started":
-                    if (Status=="Stopping…") break;
+                    if (stopping || Status=="Stopping…") break;
                     Status = "Running on this PC";
                     NeedsAccountSetup = m.TryGetProperty("setupUrl", out var setup) && setup.ValueKind == JsonValueKind.String;
                     if (NeedsAccountSetup) AccountBrowserOpener(setup.GetString()!);
@@ -123,7 +124,7 @@ public sealed class Manager : IDisposable {
                     Status = "Not running";
                     Error = "The server stopped repeatedly. Check the logs before starting it again.";
                     break;
-                case "stopped": ClearAccountStatus(); Status = "Not running"; stopped?.TrySetResult(true); break;
+                case "stopped": ClearAccountStatus(); Status = "Not running"; break;
                 case "account-result": if (m.GetProperty("requestId").GetString() == accountId) account?.TrySetResult(m.Clone()); break;
                 case "error": ClearAccountStatus(); Error = "The action could not complete. Check folders, port and the recovery journal."; break;
             }
@@ -136,14 +137,15 @@ public sealed class Manager : IDisposable {
     }
     public async Task<bool> Stop() {
         if (!Running) return true;
-        if (Status=="Stopping…") return false;
+        if (stopping) return false;
+        stopping=true;
         Session = Guid.NewGuid();
         Status = "Stopping…";
         ClearAccountStatus();
         Notify();
-        stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
         try { await Send(new { action = "quit" }); await child!.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(5));if(reader!=null)await reader; poll.Stop(); child.Dispose(); child = null; Status = "Not running"; Notify(); return true; }
         catch { Error = "Switchboard is still finishing an operation. Wait and retry."; Notify(); return false; }
+        finally { stopping=false; }
     }
     public Task CancelServerUpdate()=>Send(new {action="cancel"});
     public Task<JsonElement> Account(string action) {

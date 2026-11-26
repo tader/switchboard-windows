@@ -30,6 +30,7 @@ public sealed class MainWindow : Window {
     bool loadingVersions;
     bool advanced;
     string? announcedFeedback;
+    string? announcedStatus;
     readonly GithubTokenStore tokenStore;
     readonly bool appUpdatesAvailable;
     string? appUpdateResult;
@@ -138,23 +139,30 @@ public sealed class MainWindow : Window {
             Background=SystemParameters.HighContrast?SystemColors.WindowBrush:new SolidColorBrush(dark?Color.FromRgb(32,32,32):Color.FromRgb(250,250,250));
             Foreground=SystemParameters.HighContrast?SystemColors.WindowTextBrush:new SolidColorBrush(dark?Color.FromRgb(245,245,245):Color.FromRgb(26,26,26));
             scroll.Background=Background;
+            var focusedServerAction=Keyboard.FocusedElement is System.Windows.Controls.Button previous && header.IsAncestorOf(previous) ? previous.Content : null;
             header.Children.Clear();
             ShowServerStatus(dark);
             var serverActions=new WrapPanel();
             Button(manager.ServerStarted?"Open Switchboard":manager.Settings.Configured?"Start Switchboard":"Set Up Switchboard",async()=>{
                 if(manager.ServerStarted)manager.Open();else await StartServer();
             },!manager.Busy && (manager.ServerStarted || !manager.Running),serverActions).Margin=new Thickness(0,4,8,4);
-            if(manager.Running)Button("Stop",async()=>{await manager.Stop();},!manager.Busy && manager.Status!="Stopping…",serverActions);
+            if(manager.Running)Button("Stop",async()=>{await manager.Stop();},!manager.Busy && (manager.Status!="Stopping…" || manager.Error!=null),serverActions);
             header.Children.Add(serverActions);
+            if (focusedServerAction != null) {
+                var enabled=serverActions.Children.OfType<System.Windows.Controls.Button>().Where(button=>button.IsEnabled).ToArray();
+                var next=enabled.FirstOrDefault(button=>Equals(button.Content,focusedServerAction)) ?? enabled.FirstOrDefault();
+                if (next!=null) next.Focus(); else (advanced?advancedTab:generalTab).Focus();
+            }
+            if (manager.Error != null) LiveMessage(manager.Error,header,announce:false);
+            if (manager.Installation != null)
+                header.Children.Add(new System.Windows.Controls.ProgressBar { IsIndeterminate=true, Height=4, Margin=new Thickness(0,4,0,4) });
+            if (manager.CanCancelInstallation)
+                Button("Cancel Installation",()=>{manager.Installation?.Cancel();return Task.CompletedTask;},true,header);
             if (!forceBody && !manager.Busy && !manager.Running &&
                 Keyboard.FocusedElement is TextBox field && body.IsAncestorOf(field)) return;
             if (!forceBody && Keyboard.FocusedElement is PasswordBox entry && body.IsAncestorOf(entry)) return;
             body.Children.Clear();
             footer.Children.Clear();
-            if(manager.Error!=null) Text(manager.Error);
-            if(manager.Installation!=null)
-                header.Children.Add(new System.Windows.Controls.ProgressBar { IsIndeterminate=true, Height=4, Margin=new Thickness(0,4,0,4) });
-            if(manager.Installation!=null && manager.CanCancelInstallation) Button("Cancel Installation",()=>{manager.Installation.Cancel();return Task.CompletedTask;});
             if(!advanced){
                 if(!manager.Settings.Configured)Text("Set up Switchboard to download the server and create your account in your browser. The recommended settings are ready.");
                 if (manager.ServerStarted) {
@@ -200,8 +208,14 @@ public sealed class MainWindow : Window {
         };
         DockPanel.SetDock(dot,Dock.Left);
         row.Children.Add(dot);
-        row.Children.Add(new TextBlock { Text="Server · "+manager.ServerStatus, Foreground=Foreground, TextWrapping=TextWrapping.Wrap, FontSize=14 });
+        var status=new TextBlock { Text="Server · "+manager.ServerStatus, Foreground=Foreground, TextWrapping=TextWrapping.Wrap, FontSize=14 };
+        AutomationProperties.SetLiveSetting(status,AutomationLiveSetting.Polite);
+        row.Children.Add(status);
         header.Children.Add(row);
+        if (status.Text!=announcedStatus) {
+            announcedStatus=status.Text;
+            Announce(status);
+        }
     }
 
     internal void ShowAppUpdateResult(string? candidate) {
@@ -519,7 +533,11 @@ public sealed class MainWindow : Window {
         var text=new TextBlock { Text=message, TextWrapping=TextWrapping.Wrap, Margin=new Thickness(0,4,0,4) };
         AutomationProperties.SetLiveSetting(text,AutomationLiveSetting.Polite);
         panel.Children.Add(text);
-        if (announce && UIElementAutomationPeer.CreatePeerForElement(text) is AutomationPeer peer)
+        if (announce) Announce(text);
+    }
+
+    static void Announce(TextBlock text) {
+        if (UIElementAutomationPeer.CreatePeerForElement(text) is AutomationPeer peer)
             peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }
 
