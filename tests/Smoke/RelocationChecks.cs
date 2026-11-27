@@ -15,6 +15,7 @@ static class RelocationChecks {
         }
     }
     static Settings Clone(Settings s) => JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(s))!;
+    static string Feedback(Window window) => string.Join(" | ",Descendants(window).OfType<TextBlock>().Select(t=>t.Text));
     static Settings Fixture(string folder,string runtime) {
         var s=new Settings{DataPath=Path.Combine(folder,"Data"),StatePath=Path.Combine(folder,"State"),RuntimePath=runtime,Configured=true};
         PreviewChecks.Seed(s,runtime);File.WriteAllText(Path.Combine(s.DataPath,"synthetic.txt"),"preserved");return s;
@@ -40,7 +41,7 @@ static class RelocationChecks {
                 Require(Epoch(source)==before,"Rejected unchecked switch retired previews");
                 Require(Descendants(window).OfType<TextBlock>().Any(t=>t.Text.Contains("Choose Copy and verify")),"Unchecked switch did not explain recovery");
                 GuiSave(window,next,true);
-                Require(Maintenance.Same(manager.Settings.DataPath,next.DataPath)&&Maintenance.Same(manager.Settings.StatePath,next.StatePath),"Checked GUI folder move was not saved");
+                Require(Maintenance.Same(manager.Settings.DataPath,next.DataPath)&&Maintenance.Same(manager.Settings.StatePath,next.StatePath),"Checked GUI folder move was not saved: "+Feedback(window));
                 Require(Epoch(source)!=before,"GUI move did not advance source epoch");
                 Require(!Directory.EnumerateFiles(Settings.Canonical(source.StatePath)+".activity-previews","*.enc").Any(),"GUI move left old previews");
                 Require(!File.Exists(Path.Combine(source.StatePath,Maintenance.RelocationFile)),"Committed GUI move left a pending journal");
@@ -74,7 +75,7 @@ static class RelocationChecks {
                 foreach(var field in new[]{("Data folder",next.DataPath),("Updater folder",next.StatePath)})
                     Require(((TextBox)Descendants(resumedWindow).OfType<Label>().Single(l=>Equals(l.Content,field.Item1)).Target).Text==field.Item2,"Restart did not restore the pending destination draft");
                 Descendants(resumedWindow).OfType<Button>().Single(b=>Equals(b.Content,"Save Changes")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                Require(Maintenance.Same(resumed.Settings.DataPath,next.DataPath)&&Maintenance.Same(resumed.Settings.StatePath,next.StatePath),"Restarted GUI Save did not resume the move");
+                Require(Maintenance.Same(resumed.Settings.DataPath,next.DataPath)&&Maintenance.Same(resumed.Settings.StatePath,next.StatePath),"Restarted GUI Save did not resume the move: "+Feedback(resumedWindow));
             } finally { resumedWindow.Hide(); }
             Require(Epoch(source)==retiredEpoch,"Retry changed or restored the retired source epoch");
             Require(File.ReadAllText(Path.Combine(next.DataPath,"synthetic.txt"))=="preserved","Resumed move lost data");
