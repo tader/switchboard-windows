@@ -24,8 +24,20 @@ public sealed class Manager : IDisposable {
     internal bool NeedsAccountSetup { get; private set; }
     internal bool ServerStarted => Running && Status == "Running on this PC" && !stopping;
     public event Action? Changed;
-    public void ApplySettings(Settings value) { saveSettings(value); Settings = value; Notify(); }
+    public void ApplySettings(Settings value, bool copyFolders = false) {
+        var source = Settings;
+        var foldersChanged = !Maintenance.Same(source.DataPath,value.DataPath) || !Maintenance.Same(source.StatePath,value.StatePath);
+        if (foldersChanged) {
+            if (Running || Busy) throw new Exception("Stop Switchboard before changing folders.");
+            Maintenance.Relocate(source,value,copyFolders,selected=>{saveSettings(selected);Settings=selected;});
+            Error = null;
+        } else {
+            saveSettings(value); Settings = value;
+        }
+        Notify();
+    }
     public CancellationTokenSource? Installation { get; private set; }
+    internal Func<Settings, Action<string>, CancellationToken, Task<string>> RuntimeInstallation { get; set; } = RuntimeInstaller.Install;
     private Process? child;
     private Task? reader;
     private readonly SemaphoreSlim commands = new(1);
@@ -40,13 +52,13 @@ public sealed class Manager : IDisposable {
     internal Manager(Settings? settings, Action<Settings> saveSettings) {
         Settings=settings??global::Switchboard.Settings.Load();
         this.saveSettings=saveSettings;
+        Maintenance.RecoverCommittedRelocation(Settings);
         var journal=Path.Combine(Settings.StatePath,"runtime-install.json");
-        if(File.Exists(journal)) {
+        if(File.Exists(journal) && !File.Exists(Path.Combine(Settings.StatePath,Maintenance.RelocationFile))) {
             using var controller=RuntimeInstaller.Lease(Path.Combine(Settings.StatePath,"controller-lease.db"));
             using var server=RuntimeInstaller.Lease(Path.Combine(Settings.DataPath,".server-lease.db"));
             var pending=JsonSerializer.Deserialize<Settings>(File.ReadAllText(journal))!; pending.Validate();
-            if(pending.RuntimePath==null || !File.Exists(Path.Combine(pending.RuntimePath,"runtime.json")))throw new Exception("Installation recovery requires inspection. Preserve both folders.");
-            global::Switchboard.Settings.Atomic(Path.Combine(Settings.StatePath,"current.json"),JsonSerializer.Serialize(new {release=pending.RuntimePath}));
+            PreviewLifecycle.RecoverSelection(Settings, pending);
             pending.Save();Settings=pending;File.Delete(journal);
         }
         poll.Tick += async (_, _) => {
@@ -77,23 +89,39 @@ public sealed class Manager : IDisposable {
         if (Busy || Running) return;
         await Work(async () => {
             if (Settings.RuntimePath == null) await InstallCore();
-            Settings.Validate(); global::Switchboard.Settings.PrivateFolder(Settings.DataPath); global::Switchboard.Settings.PrivateFolder(Settings.StatePath);
-            var serverEnvironment = GithubApi.ServerEnvironment(Settings, new GithubTokenStore().Read());
-            var start = new ProcessStartInfo(Path.Combine(Settings.RuntimePath!, "bin", "node.exe")) { WorkingDirectory = Settings.RuntimePath!, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-            start.ArgumentList.Add("--disable-warning=ExperimentalWarning"); start.ArgumentList.Add("updater/desktop.ts");
-            start.Environment.Remove("SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN");
-            start.Environment.Remove("NODE_OPTIONS"); start.Environment.Remove("NODE_PATH");
-            Session = Guid.NewGuid();
-            ClearAccountStatus();
-            Status = "Starting…";
-            child = Process.Start(start) ?? throw new Exception("Could not start Switchboard.");
-            job.Attach(child);
-            // Never forward raw stderr, IPC payloads or setup links into logs.
-            _ = child.StandardError.ReadToEndAsync();
-            reader = Read(child);
-            await Send(new { action = "start", settings = new { instance = "local-manager", mode = "runtime", dataDir = Settings.DataPath, stateDir = Settings.StatePath, initialRelease = Settings.RuntimePath, appUrl = Settings.ControlUrl, env = serverEnvironment } });
-            poll.Start();
+            await Launch();
         });
+    }
+    internal Task InstallAndStart() => Work(async () => {
+        if (Running && !await Stop()) return;
+        await InstallCore();
+        await Launch();
+    });
+    private async Task Launch() {
+        Maintenance.RecoverCommittedRelocation(Settings);
+        if (File.Exists(Path.Combine(Settings.StatePath,Maintenance.RelocationFile))) throw new Exception("A folder move is pending. Retry Save Changes with the same destination folders before starting the server.");
+        Settings.Validate(); global::Switchboard.Settings.PrivateFolder(Settings.DataPath); global::Switchboard.Settings.PrivateFolder(Settings.StatePath);
+        var serverEnvironment = GithubApi.ServerEnvironment(Settings, new GithubTokenStore().Read());
+        var pointer = Path.Combine(Settings.StatePath, "current.json");
+        var runtime = Settings.RuntimePath ?? throw new InvalidOperationException("Install a runtime first.");
+        if (File.Exists(pointer)) {
+            using var current = JsonDocument.Parse(File.ReadAllText(pointer));
+            runtime = current.RootElement.GetProperty("release").GetString() ?? throw new InvalidOperationException("Selected runtime is missing.");
+        }
+        var start = new ProcessStartInfo(Path.Combine(runtime, "bin", "node.exe")) { WorkingDirectory = runtime, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        start.ArgumentList.Add("--disable-warning=ExperimentalWarning"); start.ArgumentList.Add("updater/desktop.ts");
+        start.Environment.Remove("SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN");
+        start.Environment.Remove("NODE_OPTIONS"); start.Environment.Remove("NODE_PATH");
+        Session = Guid.NewGuid();
+        ClearAccountStatus();
+        Status = "Starting…";
+        child = Process.Start(start) ?? throw new Exception("Could not start Switchboard.");
+        job.Attach(child);
+        // Never forward raw stderr, IPC payloads or setup links into logs.
+        _ = child.StandardError.ReadToEndAsync();
+        reader = Read(child);
+        await Send(new { action = "start", settings = new { instance = "local-manager", mode = "runtime", runtimePreviewLifecycle = true, dataDir = Settings.DataPath, stateDir = Settings.StatePath, initialRelease = runtime, appUrl = Settings.ControlUrl, env = serverEnvironment } });
+        poll.Start();
     }
     private async Task Read(Process process) {
         try { while (await process.StandardOutput.ReadLineAsync() is { } line) {
@@ -126,7 +154,14 @@ public sealed class Manager : IDisposable {
                     break;
                 case "stopped": ClearAccountStatus(); Status = "Not running"; break;
                 case "account-result": if (m.GetProperty("requestId").GetString() == accountId) account?.TrySetResult(m.Clone()); break;
-                case "error": ClearAccountStatus(); Error = "The action could not complete. Check folders, port and the recovery journal."; break;
+                case "error":
+                    ClearAccountStatus();
+                    Error = "The action could not complete. Check folders, port and the recovery journal.";
+                    if (Status == "Starting…") {
+                        Status = "Stopping…";
+                        await Send(new { action = "quit" });
+                    }
+                    break;
             }
             if(before!=(Status,AccountReady,NeedsAccountSetup,Attention,Error,UpdateState))Notify();
         } } catch { Error = "The local manager disconnected. Stop and inspect the recovery journal."; }
@@ -171,14 +206,14 @@ public sealed class Manager : IDisposable {
     public Task Work(Func<Task> action) { if(Busy)return Task.CompletedTask;return currentWork=RunWork(action); }
     public async Task<bool> Shutdown() { if(Busy){Installation?.Cancel();await currentWork;}return await Stop(); }
     private async Task RunWork(Func<Task> action) { if (Busy) return; Busy = true; Error = null; Notify(); try { await action(); } catch (Exception e) { Error = e.Message; if(!Running)Status="Not running"; } finally { Busy = false; Notify(); } }
-    public async Task InstallCore() {
-        if (Running && !await Stop()) return;
+    private async Task InstallCore() {
+        if (File.Exists(Path.Combine(Settings.StatePath,Maintenance.RelocationFile))) throw new Exception("A folder move is pending. Retry Save Changes with the same destination folders before installing a runtime.");
         Installation = new CancellationTokenSource();CanCancelInstallation=true;
         string path;
-        try { path = await Task.Run(() => RuntimeInstaller.Install(Settings, text => { Status = text;if(text=="Finishing installation…")CanCancelInstallation=false; Notify(); }, Installation.Token)); }
+        try { path = await Task.Run(() => RuntimeInstallation(Settings, text => { Status = text;if(text=="Finishing installation…")CanCancelInstallation=false; Notify(); }, Installation.Token)); }
         catch { Status = "Not running"; throw; }
         finally { Installation.Dispose(); Installation = null;CanCancelInstallation=false; }
-        Settings.RuntimePath = path; Settings.Configured = true; Settings.Save(); File.Delete(Path.Combine(Settings.StatePath,"runtime-install.json")); Status = "Not running";
+        Settings.RuntimePath = path; Settings.Configured = true; saveSettings(Settings); File.Delete(Path.Combine(Settings.StatePath,"runtime-install.json")); Status = "Not running";
     }
     public void Dispose() { disposed=true;poll.Stop(); job.Dispose(); child?.Dispose(); }
 }

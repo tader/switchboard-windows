@@ -125,6 +125,11 @@ class Program {
         Require(!item.Available && tray.CurrentIcon==normal && tray.Tooltip=="Switchboard: Not running","Tray badge did not clear");
     }
     [STAThread] static int Main(string[] args) {
+        if (args.Length == 4 && args[0] == "--repair") {
+            using var repairDeadline = new System.Threading.Timer(_ => Environment.FailFast("Repair rehearsal deadline exceeded"), null, TimeSpan.FromMinutes(12), Timeout.InfiniteTimeSpan);
+            RepairChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), Wait, Descendants);
+            return 0;
+        }
         using var deadline=new System.Threading.Timer(_=>Environment.FailFast("Smoke test deadline exceeded"),null,TimeSpan.FromMinutes(3),Timeout.InfiniteTimeSpan);
         Console.WriteLine("Starting ownership smoke checks");
         var root=Path.Combine(Path.GetTempPath(),"switchboard-windows-smoke-"+Guid.NewGuid());Directory.CreateDirectory(root);
@@ -133,11 +138,16 @@ class Program {
             var original=settings.StatePath;settings.StatePath=settings.DataPath.ToUpperInvariant();try{settings.Validate();throw new Exception("Overlap accepted");}catch(Exception e){Require(e.Message.Contains("separate"),"Wrong overlap error");}settings.StatePath=original;
             settings.Port=80;try{settings.Validate();throw new Exception("Privileged port accepted");}catch(Exception e){Require(e.Message.Contains("port"),"Wrong port error");}settings.Port=8770;
             Settings.PrivateFolder(settings.DataPath);Settings.PrivateFolder(settings.StatePath);
+            var longMetadata=Path.Combine(root,new string('a',120),new string('b',120),"state.json");
+            Settings.PrivateFolder(Path.GetDirectoryName(longMetadata)!);
+            Settings.Atomic(longMetadata,"first");Settings.Atomic(longMetadata,"second");
+            Require(File.ReadAllText(longMetadata)=="second","Atomic metadata replacement failed past the legacy path limit");
             File.WriteAllText(Path.Combine(settings.DataPath,".server-lock"),"synthetic stale metadata");
             using(var lease=RuntimeInstaller.Lease(Path.Combine(settings.DataPath,".server-lease.db"))) {try{Maintenance.RecoverLock(settings);throw new Exception("Active lease ignored");}catch(Microsoft.Data.Sqlite.SqliteException){}}
             Maintenance.RecoverLock(settings);Require(!File.Exists(Path.Combine(settings.DataPath,".server-lock")),"Lock not archived");Require(Directory.GetFiles(Path.Combine(settings.StatePath,"recovered-locks")).Length==1,"Lock bytes not preserved");
             File.WriteAllText(Path.Combine(settings.DataPath,"synthetic.txt"),"synthetic data");
             var next=new Settings{DataPath=Path.Combine(root,"DataCopy"),StatePath=Path.Combine(root,"StateCopy")};Maintenance.Relocate(settings,next);Require(File.ReadAllText(Path.Combine(next.DataPath,"synthetic.txt"))=="synthetic data","Relocation content changed");Require(File.Exists(Path.Combine(settings.DataPath,"synthetic.txt")),"Original removed");
+            Maintenance.CompleteRelocation(settings);
             var requests=0;
             foreach(var scenario in new[]{(Verified:false,Current:true),(Verified:true,Current:false)}) {
                 try{RecoveryAuthorization.Run(()=>Task.FromResult(scenario.Verified),()=>scenario.Current,()=>{requests++;return Task.CompletedTask;}).GetAwaiter().GetResult();throw new Exception("Unsafe recovery accepted");}catch(Exception e){Require(e.Message.Contains("not authorized")||e.Message.Contains("changed"),"Wrong recovery result");}
@@ -277,6 +287,8 @@ class Program {
             } finally { window.Hide(); store.Remove(); }
             Require(!window.IsVisible,"Closing settings failed");
             if(args.Length>1) {
+                RelocationChecks.Run(Path.Combine(root,"RelocationRecovery"),Path.GetFullPath(args[1]));
+                PreviewChecks.Run(Path.Combine(root,"PreviewLifecycle"),Path.GetFullPath(args[1]));
                 Console.WriteLine("Starting native manager/core lifecycle checks");
                 var socket=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);socket.Start();var port=((System.Net.IPEndPoint)socket.LocalEndpoint).Port;socket.Stop();
                 var owned=new Settings{DataPath=Path.Combine(root,"OwnedData"),StatePath=Path.Combine(root,"OwnedState"),RuntimePath=Path.GetFullPath(args[1]),Configured=true,Port=port,BrowserUrl=$"http://127.0.0.1:{port}"};
@@ -340,6 +352,12 @@ class Program {
 
                 } finally { readyWindow.Hide(); }
                 Wait(local.Stop());Require(!local.Running,"Owned server remained running");
+                // Supply the prepared fixture at the download boundary; exercise the real
+                // desktop installation completion and launch paths without a release upload.
+                local.RuntimeInstallation = (s, progress, cancellation) => Task.FromResult(Path.GetFullPath(args[1]));
+                Wait(local.InstallAndStart());
+                Wait(Task.Run(async()=>{var until=DateTime.UtcNow.AddSeconds(30);while(!local.ServerStarted){if(local.Error!=null)throw new Exception(local.Error);if(DateTime.UtcNow>until)throw new Exception("Reinstallation did not start the server automatically");await Task.Delay(100);}}));
+                Wait(local.Stop());
                 Wait(local.Start());Wait(Task.Delay(1500));Wait(local.Stop());
                 Wait(local.Start());Wait(Task.Delay(1500));
                 var supervisor=local.OwnedSupervisorId;Require(supervisor!=null,"No owned supervisor");System.Diagnostics.Process.GetProcessById(supervisor!.Value).Kill();

@@ -18,7 +18,6 @@ public sealed class MainWindow : Window {
     readonly ScrollViewer scroll;
     readonly Dictionary<string,string> edits = new();
     bool copyFolders;
-    (string Data, string Updater, string? Runtime)? verifiedCopy;
     string? startupError;
     string? preferenceFeedback;
     string? accountFeedback;
@@ -68,9 +67,16 @@ public sealed class MainWindow : Window {
             }
         };
         Activated+=(_,_)=>{if(!advanced)Refresh();};
-        Loaded+=(_,_)=>generalTab.Focus();
+        Loaded+=(_,_)=>{if(advanced)advancedTab.Focus();else generalTab.Focus();};
         Microsoft.Win32.SystemEvents.UserPreferenceChanged+=(_,_)=>Dispatcher.Invoke(Refresh);
         Closing+=(_,e)=>{e.Cancel=true;Hide();};
+        if (Maintenance.PendingRelocation(manager.Settings) is { } pending) {
+            if(!Maintenance.Same(manager.Settings.DataPath,pending.TargetData))edits["Data folder"]=pending.TargetData;
+            if(!Maintenance.Same(manager.Settings.StatePath,pending.TargetState))edits["Updater folder"]=pending.TargetState;
+            copyFolders=true;
+            advancedFeedback="A folder move is pending. Save Changes to resume. The original folders are kept.";
+            advancedTab.IsChecked=true;
+        }
         Refresh();
     }
 
@@ -192,7 +198,7 @@ public sealed class MainWindow : Window {
             }else{
                 AdvancedSettings();
                 VersionPinning();
-                Text("Maintenance",true);if(manager.UpdateState is "queued" or "preparing")Button("Cancel Server Update",manager.CancelServerUpdate,manager.Running);if(manager.UpdateState.Length>0)Text(manager.UpdateState);Button("Recover Server Lock…",()=>{if(System.Windows.MessageBox.Show(this,"Archive leftover lock metadata after checking exclusive ownership? Data stays in place.","Recover server lock",MessageBoxButton.OKCancel)==MessageBoxResult.OK)Maintenance.RecoverLock(manager.Settings);return Task.CompletedTask;},!manager.Running&&!manager.Busy);Button("Show Logs and Backups",()=>{manager.ShowLogs();return Task.CompletedTask;});Button("Reinstall Selected Release",()=>manager.Work(manager.InstallCore),!manager.Busy);
+                Text("Maintenance",true);if(manager.UpdateState is "queued" or "preparing")Button("Cancel Server Update",manager.CancelServerUpdate,manager.Running);if(manager.UpdateState.Length>0)Text(manager.UpdateState);Button("Recover Server Lock…",()=>{if(System.Windows.MessageBox.Show(this,"Archive leftover lock metadata after checking exclusive ownership? Data stays in place.","Recover server lock",MessageBoxButton.OKCancel)==MessageBoxResult.OK)Maintenance.RecoverLock(manager.Settings);return Task.CompletedTask;},!manager.Running&&!manager.Busy);Button("Show Logs and Backups",()=>{manager.ShowLogs();return Task.CompletedTask;});Button("Reinstall Selected Release",manager.InstallAndStart,!manager.Busy);
             }
 
         });
@@ -294,9 +300,9 @@ public sealed class MainWindow : Window {
             } finally { checkingServerRelease=false; }
         },!manager.Busy && !checkingServerRelease,server);
         if (selected != null && selected != installed)
-            Button(manager.Running?"Stop & Install Server Release…":"Install Server Release…",async()=>{
-                if(System.Windows.MessageBox.Show(this,"Install the selected server release? Your data is kept and the server will be left stopped.","Server update",MessageBoxButton.OKCancel)==MessageBoxResult.OK)
-                    await manager.Work(manager.InstallCore);
+            Button("Install Server Release…",async()=>{
+                if(System.Windows.MessageBox.Show(this,"Install the selected server release? Your data is kept. Switchboard starts automatically after installation. If the server is running, it will be unavailable during installation.","Server update",MessageBoxButton.OKCancel)==MessageBoxResult.OK)
+                    await manager.InstallAndStart();
             },!manager.Busy,server);
     }
 
@@ -426,23 +432,15 @@ public sealed class MainWindow : Window {
             advancedErrorField="Port"; draft.ValidatePort();
             advancedErrorField="Browser URL"; draft.ValidateBrowserUrl();
             advancedErrorField=null;
-            var target=(draft.DataPath,draft.StatePath);
-            if (verifiedCopy is { } verified && (verified.Data,verified.Updater)==target) {
-                draft.RuntimePath=verified.Runtime;
-            } else if (copyFolders) {
-                Maintenance.Relocate(manager.Settings,draft);
-                verifiedCopy=(target.DataPath,target.StatePath,draft.RuntimePath);
-            }
-            manager.ApplySettings(draft);
+            manager.ApplySettings(draft,copyFolders);
         } catch (Exception e) {
             advancedFeedback=e.Message;
-            if (verifiedCopy is { } copied && (copied.Data,copied.Updater)==(draft.DataPath,draft.StatePath) && advancedErrorField==null)
-                advancedFeedback+=" The folders were copied. Retry with the same paths to save the settings without copying again.";
+            if (System.IO.File.Exists(System.IO.Path.Combine(manager.Settings.StatePath,Maintenance.RelocationFile)))
+                advancedFeedback+=" A folder move is pending. Retry with the same destination folders to resume; the originals are kept.";
             SelectAdvancedAfterError();
             return false;
         }
         edits.Clear();
-        verifiedCopy=null;
         advancedFeedback="Changes saved";
         Refresh(forceBody:true);
         return true;

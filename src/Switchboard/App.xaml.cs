@@ -48,7 +48,7 @@ public partial class App : System.Windows.Application {
             settings?.Refresh();
         });
         tray.Update(manager.ServerStatus,manager.Attention);
-        if (!manager.Settings.Configured || e.Args.Contains("--show-settings")) ShowSettings();
+        if (!manager.Settings.Configured || Maintenance.PendingRelocation(manager.Settings)!=null || e.Args.Contains("--show-settings")) ShowSettings();
         if (manager.Settings.Configured && manager.Settings.StartServer) _ = manager.Start();
     }
     private Task StartFromTray() => settings?.StartServer() ?? manager!.Start();
