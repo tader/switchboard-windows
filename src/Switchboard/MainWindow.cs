@@ -192,7 +192,7 @@ public sealed class MainWindow : Window {
             }else{
                 AdvancedSettings();
                 VersionPinning();
-                Text("Maintenance",true);if(manager.UpdateState is "queued" or "preparing")Button("Cancel Server Update",manager.CancelServerUpdate,manager.Running);if(manager.UpdateState.Length>0)Text(manager.UpdateState);Button("Recover Server Lock…",()=>{if(System.Windows.MessageBox.Show(this,"Archive leftover lock metadata after checking exclusive ownership? Data stays in place.","Recover server lock",MessageBoxButton.OKCancel)==MessageBoxResult.OK)Maintenance.RecoverLock(manager.Settings);return Task.CompletedTask;},!manager.Running&&!manager.Busy);Button("Show Logs and Backups",()=>{manager.ShowLogs();return Task.CompletedTask;});Button("Reinstall Selected Release",()=>manager.Work(manager.InstallCore),!manager.Busy);
+                Text("Maintenance",true);if(manager.UpdateState is "queued" or "preparing")Button("Cancel Server Update",manager.CancelServerUpdate,manager.Running);if(manager.UpdateState.Length>0)Text(manager.UpdateState);Button("Recover Server Lock…",()=>{if(System.Windows.MessageBox.Show(this,"Archive leftover lock metadata after checking exclusive ownership? Data stays in place.","Recover server lock",MessageBoxButton.OKCancel)==MessageBoxResult.OK)Maintenance.RecoverLock(manager.Settings);return Task.CompletedTask;},!manager.Running&&!manager.Busy);Button("Show Logs and Backups",()=>{manager.ShowLogs();return Task.CompletedTask;});Button("Reinstall Selected Release",manager.InstallAndStart,!manager.Busy);
             }
 
         });
@@ -294,9 +294,9 @@ public sealed class MainWindow : Window {
             } finally { checkingServerRelease=false; }
         },!manager.Busy && !checkingServerRelease,server);
         if (selected != null && selected != installed)
-            Button(manager.Running?"Stop & Install Server Release…":"Install Server Release…",async()=>{
-                if(System.Windows.MessageBox.Show(this,"Install the selected server release? Your data is kept and the server will be left stopped.","Server update",MessageBoxButton.OKCancel)==MessageBoxResult.OK)
-                    await manager.Work(manager.InstallCore);
+            Button("Install Server Release…",async()=>{
+                if(System.Windows.MessageBox.Show(this,"Install the selected server release? Your data is kept. Switchboard starts automatically after installation. If the server is running, it will be unavailable during installation.","Server update",MessageBoxButton.OKCancel)==MessageBoxResult.OK)
+                    await manager.InstallAndStart();
             },!manager.Busy,server);
     }
 

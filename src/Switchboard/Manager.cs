@@ -77,23 +77,37 @@ public sealed class Manager : IDisposable {
         if (Busy || Running) return;
         await Work(async () => {
             if (Settings.RuntimePath == null) await InstallCore();
-            Settings.Validate(); global::Switchboard.Settings.PrivateFolder(Settings.DataPath); global::Switchboard.Settings.PrivateFolder(Settings.StatePath);
-            var serverEnvironment = GithubApi.ServerEnvironment(Settings, new GithubTokenStore().Read());
-            var start = new ProcessStartInfo(Path.Combine(Settings.RuntimePath!, "bin", "node.exe")) { WorkingDirectory = Settings.RuntimePath!, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-            start.ArgumentList.Add("--disable-warning=ExperimentalWarning"); start.ArgumentList.Add("updater/desktop.ts");
-            start.Environment.Remove("SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN");
-            start.Environment.Remove("NODE_OPTIONS"); start.Environment.Remove("NODE_PATH");
-            Session = Guid.NewGuid();
-            ClearAccountStatus();
-            Status = "Starting…";
-            child = Process.Start(start) ?? throw new Exception("Could not start Switchboard.");
-            job.Attach(child);
-            // Never forward raw stderr, IPC payloads or setup links into logs.
-            _ = child.StandardError.ReadToEndAsync();
-            reader = Read(child);
-            await Send(new { action = "start", settings = new { instance = "local-manager", mode = "runtime", dataDir = Settings.DataPath, stateDir = Settings.StatePath, initialRelease = Settings.RuntimePath, appUrl = Settings.ControlUrl, env = serverEnvironment } });
-            poll.Start();
+            await Launch();
         });
+    }
+    internal Task InstallAndStart() => Work(async () => {
+        if (Running && !await Stop()) return;
+        await InstallCore();
+        await Launch();
+    });
+    private async Task Launch() {
+        Settings.Validate(); global::Switchboard.Settings.PrivateFolder(Settings.DataPath); global::Switchboard.Settings.PrivateFolder(Settings.StatePath);
+        var serverEnvironment = GithubApi.ServerEnvironment(Settings, new GithubTokenStore().Read());
+        var pointer = Path.Combine(Settings.StatePath, "current.json");
+        var runtime = Settings.RuntimePath ?? throw new InvalidOperationException("Install a runtime first.");
+        if (File.Exists(pointer)) {
+            using var current = JsonDocument.Parse(File.ReadAllText(pointer));
+            runtime = current.RootElement.GetProperty("release").GetString() ?? throw new InvalidOperationException("Selected runtime is missing.");
+        }
+        var start = new ProcessStartInfo(Path.Combine(runtime, "bin", "node.exe")) { WorkingDirectory = runtime, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        start.ArgumentList.Add("--disable-warning=ExperimentalWarning"); start.ArgumentList.Add("updater/desktop.ts");
+        start.Environment.Remove("SWITCHBOARD_PLUGIN_INSTALL_GITHUB_TOKEN");
+        start.Environment.Remove("NODE_OPTIONS"); start.Environment.Remove("NODE_PATH");
+        Session = Guid.NewGuid();
+        ClearAccountStatus();
+        Status = "Starting…";
+        child = Process.Start(start) ?? throw new Exception("Could not start Switchboard.");
+        job.Attach(child);
+        // Never forward raw stderr, IPC payloads or setup links into logs.
+        _ = child.StandardError.ReadToEndAsync();
+        reader = Read(child);
+        await Send(new { action = "start", settings = new { instance = "local-manager", mode = "runtime", dataDir = Settings.DataPath, stateDir = Settings.StatePath, initialRelease = runtime, appUrl = Settings.ControlUrl, env = serverEnvironment } });
+        poll.Start();
     }
     private async Task Read(Process process) {
         try { while (await process.StandardOutput.ReadLineAsync() is { } line) {
@@ -126,7 +140,14 @@ public sealed class Manager : IDisposable {
                     break;
                 case "stopped": ClearAccountStatus(); Status = "Not running"; break;
                 case "account-result": if (m.GetProperty("requestId").GetString() == accountId) account?.TrySetResult(m.Clone()); break;
-                case "error": ClearAccountStatus(); Error = "The action could not complete. Check folders, port and the recovery journal."; break;
+                case "error":
+                    ClearAccountStatus();
+                    Error = "The action could not complete. Check folders, port and the recovery journal.";
+                    if (Status == "Starting…") {
+                        Status = "Stopping…";
+                        await Send(new { action = "quit" });
+                    }
+                    break;
             }
             if(before!=(Status,AccountReady,NeedsAccountSetup,Attention,Error,UpdateState))Notify();
         } } catch { Error = "The local manager disconnected. Stop and inspect the recovery journal."; }
@@ -171,8 +192,7 @@ public sealed class Manager : IDisposable {
     public Task Work(Func<Task> action) { if(Busy)return Task.CompletedTask;return currentWork=RunWork(action); }
     public async Task<bool> Shutdown() { if(Busy){Installation?.Cancel();await currentWork;}return await Stop(); }
     private async Task RunWork(Func<Task> action) { if (Busy) return; Busy = true; Error = null; Notify(); try { await action(); } catch (Exception e) { Error = e.Message; if(!Running)Status="Not running"; } finally { Busy = false; Notify(); } }
-    public async Task InstallCore() {
-        if (Running && !await Stop()) return;
+    private async Task InstallCore() {
         Installation = new CancellationTokenSource();CanCancelInstallation=true;
         string path;
         try { path = await Task.Run(() => RuntimeInstaller.Install(Settings, text => { Status = text;if(text=="Finishing installation…")CanCancelInstallation=false; Notify(); }, Installation.Token)); }
