@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/tader/switchboard-windows/compare/v0.4.0...v0.4.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* start updated servers and restore Activity previews on Windows ([9aa3c12](https://github.com/tader/switchboard-windows/commit/9aa3c12e3594910e61e15f81f2fe9100b2fcb6f4))
+
 ## [0.4.0](https://github.com/tader/switchboard-windows/compare/v0.3.0...v0.4.0) (2026-11-26)
 
 
