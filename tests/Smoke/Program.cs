@@ -133,6 +133,10 @@ class Program {
             var original=settings.StatePath;settings.StatePath=settings.DataPath.ToUpperInvariant();try{settings.Validate();throw new Exception("Overlap accepted");}catch(Exception e){Require(e.Message.Contains("separate"),"Wrong overlap error");}settings.StatePath=original;
             settings.Port=80;try{settings.Validate();throw new Exception("Privileged port accepted");}catch(Exception e){Require(e.Message.Contains("port"),"Wrong port error");}settings.Port=8770;
             Settings.PrivateFolder(settings.DataPath);Settings.PrivateFolder(settings.StatePath);
+            var longMetadata=Path.Combine(root,new string('a',120),new string('b',120),"state.json");
+            Settings.PrivateFolder(Path.GetDirectoryName(longMetadata)!);
+            Settings.Atomic(longMetadata,"first");Settings.Atomic(longMetadata,"second");
+            Require(File.ReadAllText(longMetadata)=="second","Atomic metadata replacement failed past the legacy path limit");
             File.WriteAllText(Path.Combine(settings.DataPath,".server-lock"),"synthetic stale metadata");
             using(var lease=RuntimeInstaller.Lease(Path.Combine(settings.DataPath,".server-lease.db"))) {try{Maintenance.RecoverLock(settings);throw new Exception("Active lease ignored");}catch(Microsoft.Data.Sqlite.SqliteException){}}
             Maintenance.RecoverLock(settings);Require(!File.Exists(Path.Combine(settings.DataPath,".server-lock")),"Lock not archived");Require(Directory.GetFiles(Path.Combine(settings.StatePath,"recovered-locks")).Length==1,"Lock bytes not preserved");

@@ -46,9 +46,13 @@ public sealed class Settings {
         if (!Uri.TryCreate(BrowserUrl, UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https") || url.UserInfo.Length > 0) throw new Exception("Enter an HTTP or HTTPS browser URL without credentials.");
     }
     [System.Runtime.InteropServices.DllImport("kernel32.dll",CharSet=System.Runtime.InteropServices.CharSet.Unicode,SetLastError=true)] static extern bool MoveFileEx(string source,string target,int flags);
+    static string ExtendedPath(string value) {
+        var full=Path.GetFullPath(value);
+        return full.StartsWith(@"\\?\")?full:full.StartsWith(@"\\")?@"\\?\UNC\"+full[2..]:@"\\?\"+full;
+    }
     public static void Atomic(string file,string text) {
         var temporary=file+"."+Guid.NewGuid()+".tmp";
-        try{using(var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None,4096,FileOptions.WriteThrough)){var bytes=System.Text.Encoding.UTF8.GetBytes(text);stream.Write(bytes);stream.Flush(true);}if(!MoveFileEx(temporary,file,9))throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());}finally{if(File.Exists(temporary))File.Delete(temporary);}
+        try{using(var stream=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.None,4096,FileOptions.WriteThrough)){var bytes=System.Text.Encoding.UTF8.GetBytes(text);stream.Write(bytes);stream.Flush(true);}if(!MoveFileEx(ExtendedPath(temporary),ExtendedPath(file),9))throw new IOException("Could not save "+Path.GetFileName(file)+".",new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error()));}finally{if(File.Exists(temporary))File.Delete(temporary);}
     }
     public void Save() { Validate(); PrivateFolder(Root); Atomic(Path.Combine(Root,"settings.json"),JsonSerializer.Serialize(this)); }
 
