@@ -55,6 +55,7 @@ public static class Maintenance {
     static bool Matches(string folder,Dictionary<string,string> expected) {
         var actual=Inventory(folder);return actual.Count==expected.Count && expected.All(pair=>actual.TryGetValue(pair.Key,out var hash)&&hash==pair.Value);
     }
+    static string NewStage(string target) => Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(target)))!, ".switchboard-relocation-"+Guid.NewGuid().ToString("N"));
     public static void Relocate(Settings old, Settings next, bool copy = true, Action<Settings>? commit = null) {
         next.Validate();
         bool movingData=!Same(old.DataPath,next.DataPath),movingState=!Same(old.StatePath,next.StatePath);
@@ -100,8 +101,8 @@ public static class Maintenance {
         if(!record.Ready) {
             // A partial stage is retained as evidence; a retry gets a fresh stage, never
             // deletes user files or treats a partial copy as a verified destination.
-            record.DataStage=movingData?next.DataPath+".switchboard-relocation-"+Guid.NewGuid():null;
-            record.StateStage=movingState?next.StatePath+".switchboard-relocation-"+Guid.NewGuid():null;
+            record.DataStage=movingData?NewStage(next.DataPath):null;
+            record.StateStage=movingState?NewStage(next.StatePath):null;
             Save();
             if(movingData)CopyRelocation(old.DataPath,record.DataStage!);
             RelocationCheckpoint?.Invoke("data-copied");
