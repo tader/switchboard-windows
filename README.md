@@ -16,6 +16,8 @@ Login startup is off initially. Starting the server when the app opens is a sepa
 
 ## Data and recovery
 
+If Activity retention still shows the installation warning after updating the Windows app, open **Advanced → Maintenance** and choose **Reinstall Selected Release**. Use the latest compatible server. Switchboard starts it automatically, keeps your saved retention setting, and resumes capture for supported requests once preview storage is ready.
+
 Defaults use `%LOCALAPPDATA%\Switchboard\Data` for server data, `Updater` for runtimes, logs and backups, and `settings.json` for manager preferences. The listener defaults to `127.0.0.1:8770`. These folders use Windows ACLs limited to the owning user and SYSTEM. Use separate local NTFS folders. Existing installations must be stopped before adoption.
 
 Password recovery requires a running server and fresh Windows Hello/PIN verification. If verification is unavailable or cancelled, no recovery link is requested. The account password is entered only in your browser. Links expire and are single-use; they are not logged or saved by the app. A Windows account controlling this installation can control its data; Hello verification does not protect against malware running as that account.
