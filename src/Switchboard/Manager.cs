@@ -213,7 +213,7 @@ public sealed class Manager : IDisposable {
         try { path = await Task.Run(() => RuntimeInstallation(Settings, text => { Status = text;if(text=="Finishing installation…")CanCancelInstallation=false; Notify(); }, Installation.Token)); }
         catch { Status = "Not running"; throw; }
         finally { Installation.Dispose(); Installation = null;CanCancelInstallation=false; }
-        Settings.RuntimePath = path; Settings.Configured = true; Settings.Save(); File.Delete(Path.Combine(Settings.StatePath,"runtime-install.json")); Status = "Not running";
+        Settings.RuntimePath = path; Settings.Configured = true; saveSettings(Settings); File.Delete(Path.Combine(Settings.StatePath,"runtime-install.json")); Status = "Not running";
     }
     public void Dispose() { disposed=true;poll.Stop(); job.Dispose(); child?.Dispose(); }
 }
