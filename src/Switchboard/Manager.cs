@@ -24,7 +24,18 @@ public sealed class Manager : IDisposable {
     internal bool NeedsAccountSetup { get; private set; }
     internal bool ServerStarted => Running && Status == "Running on this PC" && !stopping;
     public event Action? Changed;
-    public void ApplySettings(Settings value) { saveSettings(value); Settings = value; Notify(); }
+    public void ApplySettings(Settings value, bool copyFolders = false) {
+        var source = Settings;
+        var foldersChanged = !Maintenance.Same(source.DataPath,value.DataPath) || !Maintenance.Same(source.StatePath,value.StatePath);
+        if (foldersChanged) {
+            if (Running || Busy) throw new Exception("Stop Switchboard before changing folders.");
+            Maintenance.Relocate(source,value,copyFolders,selected=>{saveSettings(selected);Settings=selected;});
+            Error = null;
+        } else {
+            saveSettings(value); Settings = value;
+        }
+        Notify();
+    }
     public CancellationTokenSource? Installation { get; private set; }
     internal Func<Settings, Action<string>, CancellationToken, Task<string>> RuntimeInstallation { get; set; } = RuntimeInstaller.Install;
     private Process? child;
@@ -41,8 +52,9 @@ public sealed class Manager : IDisposable {
     internal Manager(Settings? settings, Action<Settings> saveSettings) {
         Settings=settings??global::Switchboard.Settings.Load();
         this.saveSettings=saveSettings;
+        Maintenance.RecoverCommittedRelocation(Settings);
         var journal=Path.Combine(Settings.StatePath,"runtime-install.json");
-        if(File.Exists(journal)) {
+        if(File.Exists(journal) && !File.Exists(Path.Combine(Settings.StatePath,Maintenance.RelocationFile))) {
             using var controller=RuntimeInstaller.Lease(Path.Combine(Settings.StatePath,"controller-lease.db"));
             using var server=RuntimeInstaller.Lease(Path.Combine(Settings.DataPath,".server-lease.db"));
             var pending=JsonSerializer.Deserialize<Settings>(File.ReadAllText(journal))!; pending.Validate();
@@ -86,6 +98,8 @@ public sealed class Manager : IDisposable {
         await Launch();
     });
     private async Task Launch() {
+        Maintenance.RecoverCommittedRelocation(Settings);
+        if (File.Exists(Path.Combine(Settings.StatePath,Maintenance.RelocationFile))) throw new Exception("A folder move is pending. Retry Save Changes with the same destination folders before starting the server.");
         Settings.Validate(); global::Switchboard.Settings.PrivateFolder(Settings.DataPath); global::Switchboard.Settings.PrivateFolder(Settings.StatePath);
         var serverEnvironment = GithubApi.ServerEnvironment(Settings, new GithubTokenStore().Read());
         var pointer = Path.Combine(Settings.StatePath, "current.json");
@@ -193,6 +207,7 @@ public sealed class Manager : IDisposable {
     public async Task<bool> Shutdown() { if(Busy){Installation?.Cancel();await currentWork;}return await Stop(); }
     private async Task RunWork(Func<Task> action) { if (Busy) return; Busy = true; Error = null; Notify(); try { await action(); } catch (Exception e) { Error = e.Message; if(!Running)Status="Not running"; } finally { Busy = false; Notify(); } }
     private async Task InstallCore() {
+        if (File.Exists(Path.Combine(Settings.StatePath,Maintenance.RelocationFile))) throw new Exception("A folder move is pending. Retry Save Changes with the same destination folders before installing a runtime.");
         Installation = new CancellationTokenSource();CanCancelInstallation=true;
         string path;
         try { path = await Task.Run(() => RuntimeInstallation(Settings, text => { Status = text;if(text=="Finishing installation…")CanCancelInstallation=false; Notify(); }, Installation.Token)); }

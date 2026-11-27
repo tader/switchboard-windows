@@ -6,7 +6,7 @@ using Switchboard;
 static class PreviewChecks {
     static void Require(bool ok, string message) { if (!ok) throw new Exception(message); }
     static JsonElement Control(Settings s) => JsonDocument.Parse(File.ReadAllText(Path.Combine(s.StatePath, "activity-preview-control.json"))).RootElement;
-    static void Seed(Settings s, string runtime) {
+    internal static void Seed(Settings s, string runtime) {
         Settings.PrivateFolder(s.StatePath); Settings.PrivateFolder(s.DataPath);
         var start = new ProcessStartInfo(Path.Combine(runtime,"bin","node.exe")) { WorkingDirectory=runtime, UseShellExecute=false, RedirectStandardError=true, RedirectStandardOutput=true };
         start.Environment.Remove("NODE_OPTIONS"); start.Environment.Remove("NODE_PATH");

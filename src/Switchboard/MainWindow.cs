@@ -18,7 +18,6 @@ public sealed class MainWindow : Window {
     readonly ScrollViewer scroll;
     readonly Dictionary<string,string> edits = new();
     bool copyFolders;
-    (string Data, string Updater, string? Runtime)? verifiedCopy;
     string? startupError;
     string? preferenceFeedback;
     string? accountFeedback;
@@ -426,23 +425,15 @@ public sealed class MainWindow : Window {
             advancedErrorField="Port"; draft.ValidatePort();
             advancedErrorField="Browser URL"; draft.ValidateBrowserUrl();
             advancedErrorField=null;
-            var target=(draft.DataPath,draft.StatePath);
-            if (verifiedCopy is { } verified && (verified.Data,verified.Updater)==target) {
-                draft.RuntimePath=verified.Runtime;
-            } else if (copyFolders) {
-                Maintenance.Relocate(manager.Settings,draft);
-                verifiedCopy=(target.DataPath,target.StatePath,draft.RuntimePath);
-            }
-            manager.ApplySettings(draft);
+            manager.ApplySettings(draft,copyFolders);
         } catch (Exception e) {
             advancedFeedback=e.Message;
-            if (verifiedCopy is { } copied && (copied.Data,copied.Updater)==(draft.DataPath,draft.StatePath) && advancedErrorField==null)
-                advancedFeedback+=" The folders were copied. Retry with the same paths to save the settings without copying again.";
+            if (System.IO.File.Exists(System.IO.Path.Combine(manager.Settings.StatePath,Maintenance.RelocationFile)))
+                advancedFeedback+=" A folder move is pending. Retry with the same destination folders to resume; the originals are kept.";
             SelectAdvancedAfterError();
             return false;
         }
         edits.Clear();
-        verifiedCopy=null;
         advancedFeedback="Changes saved";
         Refresh(forceBody:true);
         return true;
