@@ -46,6 +46,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force .core-contract/bin | Out-Null
           Copy-Item (Get-Command node).Source .core-contract/bin/node.exe
+          # This source-built fixture has just built and verified its native adapter.
+          # Packaged x64/ARM64 adapter checks run separately in core's runtime CI.
+          node -e "const fs=require('node:fs');const version=require('./.core-contract/package.json').version;fs.writeFileSync('.core-contract/build-info.json',JSON.stringify({version,platform:'win32',arch:process.arch,activityPreviewStore:1}));fs.writeFileSync('.core-contract/runtime.json',JSON.stringify({version}));"
       - run: dotnet run --project tests/Smoke/Smoke.csproj -c Release -- .dist/screenshots .core-contract
       - name: Exercise real tray app entry point
         shell: pwsh
