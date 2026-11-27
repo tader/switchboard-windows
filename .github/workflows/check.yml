@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: tader/switchboard
-          ref: e3a074d461d216cf07fc9ccfc27dfeba4784b8c5
+          ref: ee8a4595da63e6ff98278a99a3ea44aac9346bf0
           path: .core-contract
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with: {node-version: '24'}
