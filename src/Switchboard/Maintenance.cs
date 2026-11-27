@@ -86,6 +86,8 @@ public static class Maintenance {
         void Save() => Settings.Atomic(journal,System.Text.Json.JsonSerializer.Serialize(record));
         if(record==null) {
             // All destinations are valid before advancing the source epoch.
+            if(movingData)_=Inventory(old.DataPath);
+            if(movingState)_=Inventory(old.StatePath);
             PreviewLifecycle.Retire(old,next.DataPath,next.StatePath);
             record=new RelocationRecord{SourceData=old.DataPath,SourceState=old.StatePath,TargetData=next.DataPath,TargetState=next.StatePath,Runtime=next.RuntimePath,
                 PreviewControlHash=PreviewControlHash(old),
