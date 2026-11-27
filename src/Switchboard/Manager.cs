@@ -26,6 +26,7 @@ public sealed class Manager : IDisposable {
     public event Action? Changed;
     public void ApplySettings(Settings value) { saveSettings(value); Settings = value; Notify(); }
     public CancellationTokenSource? Installation { get; private set; }
+    internal Func<Settings, Action<string>, CancellationToken, Task<string>> RuntimeInstallation { get; set; } = RuntimeInstaller.Install;
     private Process? child;
     private Task? reader;
     private readonly SemaphoreSlim commands = new(1);
@@ -194,7 +195,7 @@ public sealed class Manager : IDisposable {
     private async Task InstallCore() {
         Installation = new CancellationTokenSource();CanCancelInstallation=true;
         string path;
-        try { path = await Task.Run(() => RuntimeInstaller.Install(Settings, text => { Status = text;if(text=="Finishing installation…")CanCancelInstallation=false; Notify(); }, Installation.Token)); }
+        try { path = await Task.Run(() => RuntimeInstallation(Settings, text => { Status = text;if(text=="Finishing installation…")CanCancelInstallation=false; Notify(); }, Installation.Token)); }
         catch { Status = "Not running"; throw; }
         finally { Installation.Dispose(); Installation = null;CanCancelInstallation=false; }
         Settings.RuntimePath = path; Settings.Configured = true; Settings.Save(); File.Delete(Path.Combine(Settings.StatePath,"runtime-install.json")); Status = "Not running";

@@ -341,6 +341,12 @@ class Program {
 
                 } finally { readyWindow.Hide(); }
                 Wait(local.Stop());Require(!local.Running,"Owned server remained running");
+                // Supply the prepared fixture at the download boundary; exercise the real
+                // desktop installation completion and launch paths without a release upload.
+                local.RuntimeInstallation = (s, progress, cancellation) => Task.FromResult(Path.GetFullPath(args[1]));
+                Wait(local.InstallAndStart());
+                Wait(Task.Run(async()=>{var until=DateTime.UtcNow.AddSeconds(30);while(!local.ServerStarted){if(local.Error!=null)throw new Exception(local.Error);if(DateTime.UtcNow>until)throw new Exception("Reinstallation did not start the server automatically");await Task.Delay(100);}}));
+                Wait(local.Stop());
                 Wait(local.Start());Wait(Task.Delay(1500));Wait(local.Stop());
                 Wait(local.Start());Wait(Task.Delay(1500));
                 var supervisor=local.OwnedSupervisorId;Require(supervisor!=null,"No owned supervisor");System.Diagnostics.Process.GetProcessById(supervisor!.Value).Kill();
