@@ -69,7 +69,13 @@ static class RelocationChecks {
                 catch(Exception e) { Require(e.Message.Contains("retained relocation"),"Unexpected destination validation failure"); }
                 File.WriteAllText(Path.Combine(next.DataPath,"synthetic.txt"),"preserved");
             }
-            resumed.ApplySettings(Clone(next),true);
+            var resumedWindow=new MainWindow(resumed,new GithubTokenStore("Switchboard/Test/"+Guid.NewGuid()),false);resumedWindow.Show();
+            try {
+                foreach(var field in new[]{("Data folder",next.DataPath),("Updater folder",next.StatePath)})
+                    Require(((TextBox)Descendants(resumedWindow).OfType<Label>().Single(l=>Equals(l.Content,field.Item1)).Target).Text==field.Item2,"Restart did not restore the pending destination draft");
+                Descendants(resumedWindow).OfType<Button>().Single(b=>Equals(b.Content,"Save Changes")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Require(Maintenance.Same(resumed.Settings.DataPath,next.DataPath)&&Maintenance.Same(resumed.Settings.StatePath,next.StatePath),"Restarted GUI Save did not resume the move");
+            } finally { resumedWindow.Hide(); }
             Require(Epoch(source)==retiredEpoch,"Retry changed or restored the retired source epoch");
             Require(File.ReadAllText(Path.Combine(next.DataPath,"synthetic.txt"))=="preserved","Resumed move lost data");
             Require(!File.Exists(Path.Combine(source.StatePath,Maintenance.RelocationFile)),"Resumed settings commit left a pending receipt");

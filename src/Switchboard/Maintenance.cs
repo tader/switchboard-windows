@@ -39,6 +39,7 @@ public static class Maintenance {
     static Dictionary<string,string> Inventory(string folder) {
         var entries = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
         if (!Directory.Exists(folder)) return entries;
+        if (File.GetAttributes(folder).HasFlag(FileAttributes.ReparsePoint)) throw new Exception("Relocation requires folders without reparse points.");
         void Visit(string directory,string prefix,bool root) {
             foreach(var file in Directory.EnumerateFileSystemEntries(directory)) {
                 var name=Path.GetFileName(file);
@@ -157,6 +158,10 @@ public static class Maintenance {
         }
     }
     internal static void CompleteRelocation(Settings source) => File.Delete(Path.Combine(source.StatePath,RelocationFile));
+    internal static RelocationRecord? PendingRelocation(Settings settings) {
+        var journal=Path.Combine(settings.StatePath,RelocationFile);
+        return File.Exists(journal)?System.Text.Json.JsonSerializer.Deserialize<RelocationRecord>(File.ReadAllText(journal)):null;
+    }
     internal static void RecoverCommittedRelocation(Settings settings) {
         var journal=Path.Combine(settings.StatePath,RelocationFile);
         if(!File.Exists(journal))return;

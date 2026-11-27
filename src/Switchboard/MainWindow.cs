@@ -67,9 +67,16 @@ public sealed class MainWindow : Window {
             }
         };
         Activated+=(_,_)=>{if(!advanced)Refresh();};
-        Loaded+=(_,_)=>generalTab.Focus();
+        Loaded+=(_,_)=>{if(advanced)advancedTab.Focus();else generalTab.Focus();};
         Microsoft.Win32.SystemEvents.UserPreferenceChanged+=(_,_)=>Dispatcher.Invoke(Refresh);
         Closing+=(_,e)=>{e.Cancel=true;Hide();};
+        if (Maintenance.PendingRelocation(manager.Settings) is { } pending) {
+            if(!Maintenance.Same(manager.Settings.DataPath,pending.TargetData))edits["Data folder"]=pending.TargetData;
+            if(!Maintenance.Same(manager.Settings.StatePath,pending.TargetState))edits["Updater folder"]=pending.TargetState;
+            copyFolders=true;
+            advancedFeedback="A folder move is pending. Save Changes to resume. The original folders are kept.";
+            advancedTab.IsChecked=true;
+        }
         Refresh();
     }
 

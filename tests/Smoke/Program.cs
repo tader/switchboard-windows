@@ -138,6 +138,7 @@ class Program {
             Maintenance.RecoverLock(settings);Require(!File.Exists(Path.Combine(settings.DataPath,".server-lock")),"Lock not archived");Require(Directory.GetFiles(Path.Combine(settings.StatePath,"recovered-locks")).Length==1,"Lock bytes not preserved");
             File.WriteAllText(Path.Combine(settings.DataPath,"synthetic.txt"),"synthetic data");
             var next=new Settings{DataPath=Path.Combine(root,"DataCopy"),StatePath=Path.Combine(root,"StateCopy")};Maintenance.Relocate(settings,next);Require(File.ReadAllText(Path.Combine(next.DataPath,"synthetic.txt"))=="synthetic data","Relocation content changed");Require(File.Exists(Path.Combine(settings.DataPath,"synthetic.txt")),"Original removed");
+            Maintenance.CompleteRelocation(settings);
             var requests=0;
             foreach(var scenario in new[]{(Verified:false,Current:true),(Verified:true,Current:false)}) {
                 try{RecoveryAuthorization.Run(()=>Task.FromResult(scenario.Verified),()=>scenario.Current,()=>{requests++;return Task.CompletedTask;}).GetAwaiter().GetResult();throw new Exception("Unsafe recovery accepted");}catch(Exception e){Require(e.Message.Contains("not authorized")||e.Message.Contains("changed"),"Wrong recovery result");}
