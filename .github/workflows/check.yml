@@ -50,31 +50,9 @@ jobs:
           # Packaged x64/ARM64 adapter checks run separately in core's runtime CI.
           node -e "const fs=require('node:fs');const version=require('./.core-contract/package.json').version;fs.writeFileSync('.core-contract/build-info.json',JSON.stringify({version,platform:'win32',arch:process.arch,activityPreviewStore:1}));fs.writeFileSync('.core-contract/runtime.json',JSON.stringify({version}));"
       - run: dotnet run --project tests/Smoke/Smoke.csproj -c Release -- .dist/screenshots .core-contract
-      - name: Build fixed runtime for native repair
-        shell: pwsh
-        working-directory: .core-contract
-        env:
-          RUNTIME_ARCH: ${{ matrix.rid == 'win-arm64' && 'arm64' || 'x64' }}
-        run: |
-          $version = 'v24.22.3'
-          $archive = "node-$version-win-$env:RUNTIME_ARCH.zip"
-          Invoke-WebRequest "https://nodejs.org/dist/$version/$archive" -OutFile "$env:RUNNER_TEMP/$archive"
-          $sums = (Invoke-WebRequest "https://nodejs.org/dist/$version/SHASUMS256.txt").Content
-          $line = $sums -split "`n" | Where-Object { $_.Trim().EndsWith(" $archive") }
-          if (!$line -or (Get-FileHash "$env:RUNNER_TEMP/$archive" -Algorithm SHA256).Hash.ToLower() -ne ($line -split '\s+')[0]) { throw 'Node checksum mismatch' }
-          Expand-Archive "$env:RUNNER_TEMP/$archive" "$env:RUNNER_TEMP/repair-node"
-          python scripts/package-runtime.py --platform win32 --node "$env:RUNNER_TEMP/repair-node/node-$version-win-$env:RUNTIME_ARCH/node.exe" --arch $env:RUNTIME_ARCH --revision (git rev-parse HEAD) --output "$env:RUNNER_TEMP/repair-package"
-          if ($LASTEXITCODE) { throw 'Fixed runtime packaging failed' }
-          $package = "$env:RUNNER_TEMP/repair-package"
-          $manifest = Get-Content "$package/runtime-win32-$env:RUNTIME_ARCH.json" | ConvertFrom-Json
-          if ((Get-FileHash "$package/$($manifest.archive)" -Algorithm SHA256).Hash.ToLower() -ne $manifest.sha256) { throw 'Runtime checksum mismatch' }
-          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/repair-runtime" | Out-Null
-          tar -xzf "$package/$($manifest.archive)" -C "$env:RUNNER_TEMP/repair-runtime"
-          if ($LASTEXITCODE) { throw 'Fixed runtime extraction failed' }
-          Copy-Item "$package/runtime-win32-$env:RUNTIME_ARCH.json" "$env:RUNNER_TEMP/repair-runtime/runtime.json"
       - name: Rehearse native historical upgrade, repair and Activity reveal
         shell: pwsh
-        run: dotnet run --project tests/Smoke/Smoke.csproj -c Release -- --repair "$env:RUNNER_TEMP/repair-runtime" tests/Smoke/reveal-repair.mjs .dist/screenshots
+        run: dotnet run --project tests/Smoke/Smoke.csproj -c Release -- --repair tests/Smoke/reveal-repair.mjs .dist/screenshots
       - name: Exercise real tray app entry point
         shell: pwsh
         run: |

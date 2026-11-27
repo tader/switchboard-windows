@@ -32,7 +32,7 @@ static class RepairChecks {
         Require(child.ExitCode == 0, "Repair fixture failed. See its preceding output.");
     }
 
-    internal static void Run(string fixedRuntime, string browserScript, string screenshots, Action<Task> wait,
+    internal static void Run(string browserScript, string screenshots, Action<Task> wait,
         Func<DependencyObject, IEnumerable<DependencyObject>> descendants) {
         var application = new System.Windows.Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.Resources.MergedDictionaries.Add(new ResourceDictionary {
@@ -120,20 +120,14 @@ static class RepairChecks {
                 wait(SaveRetention());
                 Console.WriteLine("PASS: WPF install downloaded v0.16.0 → v0.17.0 and started automatically with preview capture unavailable.");
 
-                manager.RuntimeInstallation = (value, _, _) => {
-                    using var controller = RuntimeInstaller.Lease(Path.Combine(value.StatePath, "controller-lease.db"));
-                    using var server = RuntimeInstaller.Lease(Path.Combine(value.DataPath, ".server-lease.db"));
-                    var pending = new Settings { DataPath = value.DataPath, StatePath = value.StatePath, RuntimePath = fixedRuntime };
-                    PreviewLifecycle.RecoverSelection(value, pending);
-                    return Task.FromResult(fixedRuntime);
-                };
+                manager.Settings.Pin = "v0.17.1";
                 previous = manager.Settings.RuntimePath;
                 Reinstall();
                 wait(Ready(previous));
-                Require(manager.Settings.RuntimePath == fixedRuntime, "The repair did not select the fixed package.");
+                Require(Version() == "0.17.1", "Expected production Core v0.17.1.");
                 var chosen = PreviewLifecycle.SelectedRuntime(manager.Settings);
-                Require(chosen == fixedRuntime, "The supervisor pointer did not select the fixed package.");
-                void Reveal(string phase) => wait(Node(fixedRuntime, settings.DataPath, browserScript, phase, settings.ControlUrl,
+                Require(chosen == manager.Settings.RuntimePath && chosen != previous, "The supervisor did not select the downloaded package.");
+                void Reveal(string phase) => wait(Node(chosen!, settings.DataPath, browserScript, phase, settings.ControlUrl,
                     settings.StatePath, sessionFile, screenshots));
                 Reveal("after-repair");
 

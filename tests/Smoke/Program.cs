@@ -125,9 +125,9 @@ class Program {
         Require(!item.Available && tray.CurrentIcon==normal && tray.Tooltip=="Switchboard: Not running","Tray badge did not clear");
     }
     [STAThread] static int Main(string[] args) {
-        if (args.Length == 4 && args[0] == "--repair") {
+        if (args.Length == 3 && args[0] == "--repair") {
             using var repairDeadline = new System.Threading.Timer(_ => Environment.FailFast("Repair rehearsal deadline exceeded"), null, TimeSpan.FromMinutes(12), Timeout.InfiniteTimeSpan);
-            RepairChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), Wait, Descendants);
+            RepairChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Wait, Descendants);
             return 0;
         }
         using var deadline=new System.Threading.Timer(_=>Environment.FailFast("Smoke test deadline exceeded"),null,TimeSpan.FromMinutes(3),Timeout.InfiniteTimeSpan);
