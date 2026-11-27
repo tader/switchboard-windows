@@ -88,7 +88,7 @@ public static class RuntimeInstaller {
             var pending = System.Text.Json.JsonSerializer.Deserialize<Settings>(System.Text.Json.JsonSerializer.Serialize(settings))!;
             pending.RuntimePath=final;pending.Configured=true;
             Settings.Atomic(Path.Combine(settings.StatePath,"runtime-install.json"),JsonSerializer.Serialize(pending));
-            Settings.Atomic(Path.Combine(settings.StatePath,"current.json"),JsonSerializer.Serialize(new {release=final}));
+            PreviewLifecycle.RecoverSelection(settings, pending);
             return final;
         } finally { await Settings.RemoveFolder(stage); }
     }

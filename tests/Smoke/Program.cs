@@ -277,6 +277,7 @@ class Program {
             } finally { window.Hide(); store.Remove(); }
             Require(!window.IsVisible,"Closing settings failed");
             if(args.Length>1) {
+                PreviewChecks.Run(Path.Combine(root,"PreviewLifecycle"),Path.GetFullPath(args[1]));
                 Console.WriteLine("Starting native manager/core lifecycle checks");
                 var socket=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);socket.Start();var port=((System.Net.IPEndPoint)socket.LocalEndpoint).Port;socket.Stop();
                 var owned=new Settings{DataPath=Path.Combine(root,"OwnedData"),StatePath=Path.Combine(root,"OwnedState"),RuntimePath=Path.GetFullPath(args[1]),Configured=true,Port=port,BrowserUrl=$"http://127.0.0.1:{port}"};

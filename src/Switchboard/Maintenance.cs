@@ -15,6 +15,20 @@ public static class Maintenance {
         using var controller=RuntimeInstaller.Lease(Path.Combine(old.StatePath,"controller-lease.db"));
         using var server=RuntimeInstaller.Lease(Path.Combine(old.DataPath,".server-lease.db"));
         if(File.Exists(Path.Combine(old.DataPath,".server-lock"))) throw new Exception("Recover the stopped server lock before moving folders.");
+        var movingState = !Settings.Canonical(old.StatePath).Equals(Settings.Canonical(next.StatePath), StringComparison.OrdinalIgnoreCase);
+        var movingData = !Settings.Canonical(old.DataPath).Equals(Settings.Canonical(next.DataPath), StringComparison.OrdinalIgnoreCase);
+        if (!movingState && !movingData) return;
+        // Validate every destination before retirement or copying either tree.
+        foreach (var pair in new[] { (old.DataPath, next.DataPath), (old.StatePath, next.StatePath) }) {
+            if (Settings.Canonical(pair.Item1).Equals(Settings.Canonical(pair.Item2), StringComparison.OrdinalIgnoreCase)) continue;
+            if (Directory.Exists(pair.Item2) || File.Exists(pair.Item2)) throw new Exception("Choose new destination folders. The originals will be kept.");
+            foreach (var source in new[] { old.DataPath, old.StatePath }) {
+                var from = Settings.Canonical(source).TrimEnd('\\'); var to = Settings.Canonical(pair.Item2).TrimEnd('\\');
+                if (to.Equals(from, StringComparison.OrdinalIgnoreCase) || to.StartsWith(from + "\\", StringComparison.OrdinalIgnoreCase) || from.StartsWith(to + "\\", StringComparison.OrdinalIgnoreCase))
+                    throw new Exception("New folders must not overlap either original folder.");
+            }
+        }
+        PreviewLifecycle.Retire(old, next.DataPath, next.StatePath);
         foreach(var pair in new[]{(old.DataPath,next.DataPath),(old.StatePath,next.StatePath)}) {
             if(pair.Item1.Equals(pair.Item2,StringComparison.OrdinalIgnoreCase))continue;
             if(Directory.Exists(pair.Item2))throw new Exception("Choose new destination folders. The originals will be kept.");
@@ -27,7 +41,11 @@ public static class Maintenance {
                 else Rewrite(obj[key]);
             } else if(node is JsonArray array)foreach(var child in array)Rewrite(child);
         }
-        foreach(var file in Directory.EnumerateFiles(next.StatePath,"*.json").Concat(Directory.Exists(Path.Combine(next.StatePath,"history"))?Directory.EnumerateFiles(Path.Combine(next.StatePath,"history"),"*.json"):Array.Empty<string>())) {var node=JsonNode.Parse(File.ReadAllText(file));Rewrite(node);File.WriteAllText(file,node!.ToJsonString());}
+        foreach(var file in Directory.EnumerateFiles(next.StatePath,"*.json").Concat(Directory.Exists(Path.Combine(next.StatePath,"history"))?Directory.EnumerateFiles(Path.Combine(next.StatePath,"history"),"*.json"):Array.Empty<string>())) {
+            if (Path.GetFileName(file) == "activity-preview-control.json") continue;
+            var node=JsonNode.Parse(File.ReadAllText(file));Rewrite(node);Settings.Atomic(file,node!.ToJsonString());
+        }
+        if (movingState) PreviewLifecycle.ResetCopiedIdentity(next.StatePath);
         foreach(var name in new[]{"child.json","controller.lock"})File.Delete(Path.Combine(next.StatePath,name));
         if(next.RuntimePath!=null)next.RuntimePath=Rebase(next.RuntimePath);
     }

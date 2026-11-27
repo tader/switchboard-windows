@@ -45,8 +45,7 @@ public sealed class Manager : IDisposable {
             using var controller=RuntimeInstaller.Lease(Path.Combine(Settings.StatePath,"controller-lease.db"));
             using var server=RuntimeInstaller.Lease(Path.Combine(Settings.DataPath,".server-lease.db"));
             var pending=JsonSerializer.Deserialize<Settings>(File.ReadAllText(journal))!; pending.Validate();
-            if(pending.RuntimePath==null || !File.Exists(Path.Combine(pending.RuntimePath,"runtime.json")))throw new Exception("Installation recovery requires inspection. Preserve both folders.");
-            global::Switchboard.Settings.Atomic(Path.Combine(Settings.StatePath,"current.json"),JsonSerializer.Serialize(new {release=pending.RuntimePath}));
+            PreviewLifecycle.RecoverSelection(Settings, pending);
             pending.Save();Settings=pending;File.Delete(journal);
         }
         poll.Tick += async (_, _) => {
@@ -106,7 +105,7 @@ public sealed class Manager : IDisposable {
         // Never forward raw stderr, IPC payloads or setup links into logs.
         _ = child.StandardError.ReadToEndAsync();
         reader = Read(child);
-        await Send(new { action = "start", settings = new { instance = "local-manager", mode = "runtime", dataDir = Settings.DataPath, stateDir = Settings.StatePath, initialRelease = runtime, appUrl = Settings.ControlUrl, env = serverEnvironment } });
+        await Send(new { action = "start", settings = new { instance = "local-manager", mode = "runtime", runtimePreviewLifecycle = true, dataDir = Settings.DataPath, stateDir = Settings.StatePath, initialRelease = runtime, appUrl = Settings.ControlUrl, env = serverEnvironment } });
         poll.Start();
     }
     private async Task Read(Process process) {
